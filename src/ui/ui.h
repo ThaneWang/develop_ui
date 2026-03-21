@@ -4,9 +4,19 @@
 #include "lvgl/lvgl.h"
 #include "stdio.h"
 
-#define MY_SCREEN_WIDTH   1000
-#define MY_SCREEN_HEIGHT  800
+#define MY_SCREEN_WIDTH   1920
+#define MY_SCREEN_HEIGHT  1080
+#define DEEPSEEK 0
+#define AI 1
 
 void my_ui_init(void);
+
+#if DEEPSEEK
+void item_click_cb(lv_event_t *e);
+#endif
+
+#if AI
+void checkbox_event_cb(lv_event_t * e);
+#endif
 
 #endif
