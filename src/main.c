@@ -26,6 +26,7 @@
 #include "hal/hal.h"
 
 #include  "ui/ui.h"
+#include "logging.h"
 
 /*********************
  *      DEFINES
@@ -60,9 +61,11 @@ int main(int argc, char **argv)
 
   /*Initialize LVGL*/
   lv_init();
+  LOG_INFO("LVGL initialized");
 
   /*Initialize the HAL (display, input devices, tick) for LVGL*/
   sdl_hal_init(MY_SCREEN_WIDTH, MY_SCREEN_HEIGHT);
+  LOG_INFO("HAL initialized: %dx%d", MY_SCREEN_WIDTH, MY_SCREEN_HEIGHT);
 
   /* Run the default demo */
   /* To try a different demo or example, replace this with one of: */
@@ -74,7 +77,9 @@ int main(int argc, char **argv)
   //lv_demo_music();*/
 
   //初始化自定义ui
+  LOG_INFO("Initializing UI...");
   my_ui_init();
+  LOG_INFO("UI initialized");
 
   while(1) {
     /* Periodically call the lv_task handler.
@@ -83,6 +88,13 @@ int main(int argc, char **argv)
     if(sleep_time_ms == LV_NO_TIMER_READY){
 	sleep_time_ms =  LV_DEF_REFR_PERIOD;
     }
+  #if 1
+    static unsigned long __loop_cnt = 0;
+    __loop_cnt++;
+    if((__loop_cnt % 1000) == 0) {
+      LOG_DEBUG("Main loop heartbeat: sleep_time_ms=%u", (unsigned)sleep_time_ms);
+    }
+  #endif
 #ifdef _MSC_VER
     Sleep(sleep_time_ms);
 #else

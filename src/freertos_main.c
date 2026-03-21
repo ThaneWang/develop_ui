@@ -15,6 +15,7 @@
 
 #include "hal/hal.h"
 #include <stdio.h>
+#include "logging.h"
 
 // ........................................................................................................
 /**
@@ -28,7 +29,7 @@
  */
 void vApplicationMallocFailedHook(void)
 {
-    printf("Malloc failed! Available heap: %ld bytes\n", xPortGetFreeHeapSize());
+    LOG_ERROR("Malloc failed! Available heap: %ld bytes", xPortGetFreeHeapSize());
     for( ;; );
 }
 
@@ -57,7 +58,7 @@ void vApplicationIdleHook(void) {}
  */
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 {
-    printf("Stack overflow in task %s\n", pcTaskName);
+    LOG_ERROR("Stack overflow in task %s", pcTaskName);
     for(;;);
 }
 
@@ -87,7 +88,7 @@ void create_hello_world_screen()
     /* Create a new screen object */
     lv_obj_t *screen = lv_obj_create(NULL);
     if (screen == NULL){
-        printf("Error: Failed to create screen object\n");
+        LOG_ERROR("Failed to create screen object");
         /* Return if screen creation fails */
         return;
     }
@@ -95,7 +96,7 @@ void create_hello_world_screen()
     /* Create a new label object on the screen */
     lv_obj_t *label = lv_label_create(screen);
     if (label == NULL){
-        printf("Error: Failed to create label object\n");
+        LOG_ERROR("Failed to create label object");
         /* Return if label creation fails */
         return;
     }
@@ -128,6 +129,7 @@ void lvgl_task(void *pvParameters)
 
     /*Initialize the HAL (display, input devices, tick) for LVGL*/
     sdl_hal_init(320, 480);
+    LOG_INFO("LVGL task started");
     /* Show simple hello world screen */
     create_hello_world_screen();
 
@@ -150,7 +152,7 @@ void another_task(void *pvParameters)
 {
     /* Create some load in an infinite loop */
     while (true){
-        printf("Second Task is running :)\n");
+        LOG_DEBUG("Second Task is running :)");
         /* Delay the task for 500 milliseconds */
         vTaskDelay(pdMS_TO_TICKS(500));
     }

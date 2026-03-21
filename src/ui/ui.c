@@ -1,5 +1,6 @@
 //lvgl_ui_practice分支，练习ui界面设计
 #include "ui.h" // 包含 UI 头文件，声明接口和依赖
+#include "../logging.h"
 
 #if PRECTICE
 //练习
@@ -10,6 +11,7 @@ static int counter = 0;
 void btn_event_cb(lv_event_t * e) {
     counter++;
     lv_label_set_text_fmt(counter_label, "Count: %d", counter);
+    LOG_INFO("Button clicked, counter=%d", counter);
 }
 
 void my_ui_init(void) {
@@ -45,6 +47,7 @@ void my_ui_init(void) {
 
     // 添加按钮点击事件
     lv_obj_add_event_cb(btn, btn_event_cb, LV_EVENT_CLICKED, NULL);
+    LOG_INFO("my_ui_init (PRACTICE) completed");
 }
 
 #endif
@@ -66,12 +69,14 @@ static void update_total(void) // 计算并更新总价的函数
         }
     }
     lv_label_set_text_fmt(total_label, "Total: $%d", total); // 使用格式化字符串更新总价标签
+    LOG_DEBUG("update_total: total=%d", total);
 }
 
 void checkbox_event_cb(lv_event_t * e) // 复选框事件回调（值改变时调用）
 {
     LV_UNUSED(e); // 避免未使用参数的警告
     update_total(); // 当复选框值变化时重新计算总价
+    LOG_INFO("checkbox_event_cb: total updated");
 }
 
 void my_ui_init(void) // 对外初始化函数，创建并布局所有 UI 元素
@@ -126,6 +131,7 @@ void my_ui_init(void) // 对外初始化函数，创建并布局所有 UI 元素
 
     /* Initialize total display */
     update_total(); // 启动时计算并显示初始总价
+    LOG_INFO("my_ui_init (AI) completed");
 }
 #endif
 
@@ -183,6 +189,7 @@ static void inc_quantity_cb(lv_event_t *e) {
             lv_snprintf(qty_buf, sizeof(qty_buf), "%d", ctrl[idx].quantity);
             lv_label_set_text(ctrl[idx].quantity_lbl, qty_buf);
             update_total();  // 数量变化，重新计算总价
+            LOG_DEBUG("inc_quantity_cb: idx=%d quantity=%d", idx, ctrl[idx].quantity);
         }
     }
 }
@@ -198,6 +205,7 @@ static void dec_quantity_cb(lv_event_t *e) {
             lv_snprintf(qty_buf, sizeof(qty_buf), "%d", ctrl[idx].quantity);
             lv_label_set_text(ctrl[idx].quantity_lbl, qty_buf);
             update_total();
+                LOG_DEBUG("dec_quantity_cb: idx=%d quantity=%d", idx, ctrl[idx].quantity);
         }
     }
 }
@@ -209,6 +217,7 @@ static void checkbox_cb(lv_event_t *e) {
     if (idx >= 0 && idx < NUM_ITEMS) {
         ctrl[idx].selected = lv_obj_get_state(cb) & LV_STATE_CHECKED;
         update_total();
+        LOG_INFO("checkbox_cb: idx=%d selected=%d", idx, ctrl[idx].selected);
     }
 }
 
@@ -299,5 +308,6 @@ void my_ui_init(void) {
     lv_label_set_text(total_label, "Total: $0.00");
     lv_obj_set_style_text_font(total_label, &lv_font_montserrat_18, 0);
     lv_obj_align(total_label, LV_ALIGN_BOTTOM_MID, 0, -10);
+    LOG_INFO("my_ui_init (DEEPSEEK) completed");
 }
 #endif

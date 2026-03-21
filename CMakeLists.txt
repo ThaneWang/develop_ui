@@ -83,6 +83,7 @@ endif()
 
 #添加自定义的ui程序进编译
     list(APPEND MAIN_SOURCES src/ui/ui.c)
+    list(APPEND MAIN_SOURCES src/logging.c)
 
 if(NOT MSVC)
     list(APPEND MAIN_LIBS m pthread)
