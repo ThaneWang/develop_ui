@@ -6,10 +6,16 @@
 
 #define MY_SCREEN_WIDTH   1920
 #define MY_SCREEN_HEIGHT  1080
+
+#define PRECTICE 1
 #define DEEPSEEK 0
-#define AI 1
+#define AI 0
 
 void my_ui_init(void);
+
+#if PRECTICE
+void btn_event_cb(lv_event_t * e);
+#endif
 
 #if DEEPSEEK
 void item_click_cb(lv_event_t *e);

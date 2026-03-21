@@ -1,6 +1,54 @@
 //lvgl_ui_practice分支，练习ui界面设计
 #include "ui.h" // 包含 UI 头文件，声明接口和依赖
 
+#if PRECTICE
+//练习
+static lv_obj_t * counter_label;
+static int counter = 0;
+
+// 按钮点击事件回调
+void btn_event_cb(lv_event_t * e) {
+    counter++;
+    lv_label_set_text_fmt(counter_label, "Count: %d", counter);
+}
+
+void my_ui_init(void) {
+    // 获取当前活动屏幕
+    lv_obj_t * scr = lv_screen_active();
+
+    // 设置屏幕背景色
+    lv_obj_set_style_bg_color(scr, lv_color_hex(0x003a57), 0);
+
+    // 创建按钮
+    lv_obj_t * btn = lv_button_create(scr);
+    lv_obj_set_size(btn, 120, 50);
+    lv_obj_align(btn, LV_ALIGN_CENTER, 0, -30);
+
+    // 设置按钮样式
+    static lv_style_t style_btn;
+    lv_style_init(&style_btn);
+    lv_style_set_bg_color(&style_btn, lv_color_hex(0x2196f3));
+    lv_style_set_radius(&style_btn, 8);
+    lv_obj_add_style(btn, &style_btn, 0);
+
+    // 创建按钮上的标签
+    lv_obj_t * btn_label = lv_label_create(btn);
+    lv_label_set_text(btn_label, "Click Me!");
+    lv_obj_center(btn_label);
+
+    // 创建计数标签
+    counter_label = lv_label_create(scr);
+    lv_label_set_text_fmt(counter_label, "Count: %d", counter);
+    lv_obj_align(counter_label, LV_ALIGN_CENTER, 0, 40);
+    lv_obj_set_style_text_color(counter_label, lv_color_hex(0xffffff), 0);
+    lv_obj_set_style_text_font(counter_label, &lv_font_montserrat_20, 0);
+
+    // 添加按钮点击事件
+    lv_obj_add_event_cb(btn, btn_event_cb, LV_EVENT_CLICKED, NULL);
+}
+
+#endif
+
 #if AI // AI 分支编译开关（仅在定义 AI 时编译此部分）
 #define NUM_ITEMS 4 // 定义菜单项数量为 4
 
