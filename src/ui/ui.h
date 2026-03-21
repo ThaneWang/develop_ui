@@ -14,7 +14,7 @@
 void my_ui_init(void);
 
 #if PRECTICE
-void btn_event_cb(lv_event_t * e);
+void slider_event_cb(lv_event_t * e);
 #endif
 
 #if DEEPSEEK
