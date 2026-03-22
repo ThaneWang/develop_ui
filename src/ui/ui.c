@@ -7,21 +7,59 @@
 
 // 滑块事件回调
 void slider_event_cb(lv_event_t * e) {
-    int value = lv_slider_get_value(lv_event_get_target(e)); // 获取滑块当前值
+    int value = lv_slider_get_value(lv_event_get_user_data(e)); // 获取滑块当前值
     LOG_INFO("Slider changed, num=%d", value);
+}
+
+//按钮点击事件回调
+void btn_clicked_event_cb(lv_event_t * e) {
+    // 获取滑块对象
+    lv_obj_t * slider = lv_obj_get_child(lv_obj_get_parent(lv_event_get_target(e)),0); // 获取按钮的父对象（假设滑块和按钮在同一层级）
+
+    // 设置新值，启用动画
+    lv_slider_set_value(slider, lv_slider_get_value(slider)+10, LV_ANIM_ON);
+    LOG_INFO("Button clicked, changing slider value! Current value: %d", lv_slider_get_value(slider));
+
 }
 
 void my_ui_init(void) {
     // 获取当前活动屏幕
     lv_obj_t * scr = lv_screen_active();
 
-    lv_obj_t * slider = lv_slider_create(scr); // 创建滑块对象
+    lv_obj_t * slider = lv_slider_create(scr); // 创建滑块对象,父对象的第一个子对象是滑块，所以索引为0
     lv_obj_set_size(slider, 400, 20); // 设置滑块大小
     lv_slider_set_range(slider, -100, 100); // 设置滑块范围
     lv_slider_set_value(slider, 50, LV_ANIM_ON); // 设置滑块初始值为 50，且使用动画
     lv_obj_center(slider); // 将滑块居中显示
     // 添加滑块事件
-    lv_obj_add_event_cb(slider, slider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_event_cb(slider, slider_event_cb, LV_EVENT_CLICKED, slider); // 点击事件回调，传递滑块对象作为用户数据
+
+    //添加点击样式改变逻辑
+    lv_obj_t *btn = lv_btn_create(scr); // 创建按钮对象，父对象的第二个字对象是滑块，所以索引为1
+    lv_obj_set_size(btn, 200, 80); // 设置按钮大小
+    lv_obj_align(btn, LV_ALIGN_TOP_MID, 0, 100); //    将按钮放在屏幕顶部中间并向下偏移 100 像素
+    //修改两种状态下 按钮的颜色
+    lv_obj_set_style_bg_color(btn,lv_color_lighten(lv_palette_main(LV_PALETTE_GREEN),100),LV_PART_MAIN);
+    lv_obj_set_style_bg_color(btn,lv_color_black(),LV_PART_MAIN|LV_STATE_PRESSED);
+
+    static const   lv_style_prop_t  trans_props[] ={
+            LV_STYLE_OPA,
+            LV_STYLE_BG_COLOR,
+            0,
+    };
+
+    static  lv_style_transition_dsc_t trans1;
+    lv_style_transition_dsc_init(&trans1,trans_props,lv_anim_path_ease_out,500,10,NULL);
+
+    static lv_style_t style1;
+    lv_style_init(&style1);
+    lv_style_set_transition(&style1, &trans1); // 将过渡描述符应用到样式
+    lv_obj_add_style(btn, &style1, LV_PART_MAIN|LV_STATE_PRESSED); // 将样式应用到按钮
+
+    //增加按钮点击事件回调，改变滑块数值
+    lv_obj_add_event_cb(btn,btn_clicked_event_cb,LV_EVENT_CLICKED,NULL); // 点击事件回调
+
+
     LOG_INFO("my_ui_init (PRACTICE) completed");
 }
 
