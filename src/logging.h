@@ -13,7 +13,7 @@ typedef enum {
 } log_level_t;
 
 #ifndef LOG_LEVEL
-#define LOG_LEVEL LOG_LEVEL_DEBUG
+#define LOG_LEVEL LOG_LEVEL_INFO
 #endif
 
 void log_printf(log_level_t level, const char *fmt, ...);
