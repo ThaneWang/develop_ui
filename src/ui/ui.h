@@ -7,7 +7,7 @@
 #define MY_SCREEN_WIDTH   800
 #define MY_SCREEN_HEIGHT  600
 
-#define PRECTICE 1
+#define UI_DEVELOP 1
 #define DEEPSEEK 0
 #define AI 0
 

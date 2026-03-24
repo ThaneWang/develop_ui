@@ -1,9 +1,9 @@
-//lvgl_ui_practice分支，练习ui界面设计
+//new分支，用于迭代UI界面，可移植
 #include "ui.h" // 包含 UI 头文件，声明接口和依赖
 #include "../logging.h"
 
-#if PRECTICE
-//练习
+#if UI_DEVELOP
+//ui迭代
 
 // 滑块事件回调
 void slider_event_cb(lv_event_t * e) {
