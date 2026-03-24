@@ -8,7 +8,7 @@
 // 滑块事件回调
 void slider_event_cb(lv_event_t * e) {
     int value = lv_slider_get_value(lv_event_get_user_data(e)); // 获取滑块当前值
-    LOG_INFO("Slider changed, num=%d", value);
+    LOG_DEBUG("Slider changed, num=%d", value);
 }
 
 //按钮点击事件回调
@@ -18,7 +18,7 @@ void btn_clicked_event_cb(lv_event_t * e) {
 
     // 设置新值，启用动画
     lv_slider_set_value(slider, lv_slider_get_value(slider)+10, LV_ANIM_ON);
-    LOG_INFO("Button clicked, changing slider value! Current value: %d", lv_slider_get_value(slider));
+    LOG_DEBUG("Button clicked, changing slider value! Current value: %d", lv_slider_get_value(slider));
 
 }
 
@@ -60,7 +60,7 @@ void my_ui_init(void) {
     lv_obj_add_event_cb(btn,btn_clicked_event_cb,LV_EVENT_CLICKED,NULL); // 点击事件回调
 
 
-    LOG_INFO("my_ui_init (PRACTICE) completed");
+    LOG_DEBUG("my_ui_init (PRACTICE) completed");
 }
 
 #endif
@@ -89,7 +89,7 @@ void checkbox_event_cb(lv_event_t * e) // 复选框事件回调（值改变时�
 {
     LV_UNUSED(e); // 避免未使用参数的警告
     update_total(); // 当复选框值变化时重新计算总价
-    LOG_INFO("checkbox_event_cb: total updated");
+    LOG_DEBUG("checkbox_event_cb: total updated");
 }
 
 void my_ui_init(void) // 对外初始化函数，创建并布局所有 UI 元素
@@ -144,7 +144,7 @@ void my_ui_init(void) // 对外初始化函数，创建并布局所有 UI 元素
 
     /* Initialize total display */
     update_total(); // 启动时计算并显示初始总价
-    LOG_INFO("my_ui_init (AI) completed");
+    LOG_DEBUG("my_ui_init (AI) completed");
 }
 #endif
 
@@ -230,7 +230,7 @@ static void checkbox_cb(lv_event_t *e) {
     if (idx >= 0 && idx < NUM_ITEMS) {
         ctrl[idx].selected = lv_obj_get_state(cb) & LV_STATE_CHECKED;
         update_total();
-        LOG_INFO("checkbox_cb: idx=%d selected=%d", idx, ctrl[idx].selected);
+        LOG_DEBUG("checkbox_cb: idx=%d selected=%d", idx, ctrl[idx].selected);
     }
 }
 
@@ -321,6 +321,6 @@ void my_ui_init(void) {
     lv_label_set_text(total_label, "Total: $0.00");
     lv_obj_set_style_text_font(total_label, &lv_font_montserrat_18, 0);
     lv_obj_align(total_label, LV_ALIGN_BOTTOM_MID, 0, -10);
-    LOG_INFO("my_ui_init (DEEPSEEK) completed");
+    LOG_DEBUG("my_ui_init (DEEPSEEK) completed");
 }
 #endif
