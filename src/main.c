@@ -59,6 +59,12 @@ int main(int argc, char **argv)
   (void)argc; /*Unused*/
   (void)argv; /*Unused*/
 
+  /*Initialize SDL*/
+  if(SDL_Init(SDL_INIT_VIDEO) != 0) {
+    printf("SDL_Init failed: %s\n", SDL_GetError());
+    return 1;
+  }
+
   /*Initialize LVGL*/
   lv_init();
   LOG_INFO("LVGL initialized");
@@ -77,29 +83,31 @@ int main(int argc, char **argv)
   //lv_demo_music();*/
 
   //初始化自定义ui
-  LOG_INFO("Initializing UI...");
-  my_ui_init();
-  LOG_INFO("UI initialized");
+   LOG_INFO("Initializing UI...");
+   printf("Initializing UI...\n");
+   my_ui_init();
+   LOG_INFO("UI initialized");
+   printf("UI initialized\n");
 
   while(1) {
+    /* Handle SDL events */
+    SDL_Event event;
+    while(SDL_PollEvent(&event)) {
+      if(event.type == SDL_QUIT) {
+        return 0;
+      }
+    }
+
     /* Periodically call the lv_task handler.
      * It could be done in a timer interrupt or an OS task too.*/
     uint32_t sleep_time_ms = lv_timer_handler();
     if(sleep_time_ms == LV_NO_TIMER_READY){
 	sleep_time_ms =  LV_DEF_REFR_PERIOD;
     }
-  #if 1
-    static unsigned long __loop_cnt = 0;
-    __loop_cnt++;
-    if((__loop_cnt % 1000) == 0) {
-      LOG_DEBUG("Main loop heartbeat: sleep_time_ms=%u", (unsigned)sleep_time_ms);
-    }
-  #endif
-#ifdef _MSC_VER
-    Sleep(sleep_time_ms);
-#else
-    usleep(sleep_time_ms * 1000);
-#endif
+
+    if(sleep_time_ms > 50) sleep_time_ms = 50; /*Limit the sleep time to 50 ms*/
+    if(sleep_time_ms > 0)
+      SDL_Delay(sleep_time_ms);   /*Sleep until the next event happens*/
   }
 
   return 0;
