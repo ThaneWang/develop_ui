@@ -4,8 +4,8 @@
 #include "lvgl/lvgl.h"
 #include "stdio.h"
 
-#define MY_SCREEN_WIDTH   1920
-#define MY_SCREEN_HEIGHT  1080
+#define MY_SCREEN_WIDTH   800
+#define MY_SCREEN_HEIGHT  600
 
 #define PRECTICE 1
 #define DEEPSEEK 0
