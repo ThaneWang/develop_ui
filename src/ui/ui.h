@@ -7,8 +7,8 @@
 #define MY_SCREEN_WIDTH   800
 #define MY_SCREEN_HEIGHT  600
 
-#define UI_DEVELOP 0
-#define DEEPSEEK 1
+#define UI_DEVELOP 1
+#define DEEPSEEK 0
 #define AI 0
 
 void my_ui_init(void);
