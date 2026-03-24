@@ -9,16 +9,30 @@
 #if defined(__has_include)
     #if __has_include(LV_INTTYPES_INCLUDE)
         #include LV_INTTYPES_INCLUDE
-        /* platform-specific printf format for int32_t, usually "d" or "ld" */
-        #define LV_PRId32 PRId32
-        #define LV_PRIu32 PRIu32
-        #define LV_PRIx32 PRIx32
-        #define LV_PRIX32 PRIX32
+        /* platform-specific printf formats; fall back if inttypes macros are unavailable */
+        #ifdef PRId32
+            #define LV_PRId32 PRId32
+            #define LV_PRIu32 PRIu32
+            #define LV_PRIx32 PRIx32
+            #define LV_PRIX32 PRIX32
+        #else
+            #define LV_PRId32 "d"
+            #define LV_PRIu32 "u"
+            #define LV_PRIx32 "x"
+            #define LV_PRIX32 "X"
+        #endif
 
-        #define LV_PRId64 PRId64
-        #define LV_PRIu64 PRIu64
-        #define LV_PRIx64 PRIx64
-        #define LV_PRIX64 PRIX64
+        #ifdef PRId64
+            #define LV_PRId64 PRId64
+            #define LV_PRIu64 PRIu64
+            #define LV_PRIx64 PRIx64
+            #define LV_PRIX64 PRIX64
+        #else
+            #define LV_PRId64 "lld"
+            #define LV_PRIu64 "llu"
+            #define LV_PRIx64 "llx"
+            #define LV_PRIX64 "llX"
+        #endif
     #else
         #define LV_PRId32 "d"
         #define LV_PRIu32 "u"

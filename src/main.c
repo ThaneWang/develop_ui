@@ -1,7 +1,8 @@
-/**
+/*
  * @file main.c
  *
  */
+ /*主函数，用于初始化LVGL和UI界面*/
 
 /*********************
  *      INCLUDES
@@ -19,8 +20,8 @@
   #include <pthread.h>
 #endif
 #include "lvgl/lvgl.h"
-#include "lvgl/examples/lv_examples.h"
-#include "lvgl/demos/lv_demos.h"
+/*#include "lvgl/examples/lv_examples.h"
+#include "lvgl/demos/lv_demos.h"*/
 #include <SDL.h>
 
 #include "hal/hal.h"
