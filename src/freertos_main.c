@@ -102,7 +102,7 @@ void create_hello_world_screen()
     }
 
     /* Set the text of the label to "Hello, World!" */
-    lv_label_set_text(label, "Hello, World!");
+    lv_label_set_text_static(label, "Hello, World!");
 
     /* Align the label to the center of the screen */
     lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);

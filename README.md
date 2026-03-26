@@ -116,18 +116,9 @@ int main(int argc, char **argv)
 
 ## Optional library
 
-There are also FreeType and FFmpeg support. You can install these according to the followings:
+FFmpeg can be enabled for `lv_ffmpeg` when needed. Example on Linux:
 
 ### Linux
-
-```bash
-# FreeType support
-wget https://kumisystems.dl.sourceforge.net/project/freetype/freetype2/2.13.2/freetype-2.13.2.tar.xz
-tar -xf freetype-2.13.2.tar.xz
-cd freetype-2.13.2
-make
-make install
-```
 
 ```bash
 # FFmpeg support

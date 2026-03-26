@@ -657,7 +657,7 @@
 #define LV_FONT_MONTSERRAT_28_COMPRESSED    1
 #define LV_FONT_DEJAVU_16_PERSIAN_HEBREW    1
 #define LV_FONT_SOURCE_HAN_SANS_SC_14_CJK   0  /**< 1338 most common CJK radicals */
-#define LV_FONT_SOURCE_HAN_SANS_SC_16_CJK   1
+#define LV_FONT_SOURCE_HAN_SANS_SC_16_CJK   0  /**< 中文 UI 使用工程内 noto_sans_sc_16.c，关闭以减小体积 */
 
 /** Pixel perfect monospaced fonts */
 #define LV_FONT_UNSCII_8  1
@@ -672,7 +672,11 @@
  *  #define LV_FONT_CUSTOM_DECLARE   LV_FONT_DECLARE(my_font_1) LV_FONT_DECLARE(my_font_2)
  *  @endcode
  */
-#define LV_FONT_CUSTOM_DECLARE
+/** 1：中文界面使用 `src/noto_sans_sc_16.c`（静态位图字库） */
+#define LV_USE_NOTO_SANS_SC_16_STATIC 1
+
+/** 在线转换器生成的 `src/noto_sans_sc_16.c`（简体中文区 U+4E00–U+9FFF），全局可见 */
+#define LV_FONT_CUSTOM_DECLARE LV_FONT_DECLARE(noto_sans_sc_16)
 
 /** Always set a default font */
 #define LV_FONT_DEFAULT &lv_font_montserrat_14
@@ -680,7 +684,7 @@
 /** Enable handling large font and/or fonts with a lot of characters.
  *  The limit depends on the font size, font face and bpp.
  *  A compiler error will be triggered if a font needs it. */
-#define LV_FONT_FMT_TXT_LARGE 0
+#define LV_FONT_FMT_TXT_LARGE 1
 
 /** Enables/disables support for compressed fonts. */
 #define LV_USE_FONT_COMPRESSED 0
@@ -1001,16 +1005,7 @@
 /** Barcode code library */
 #define LV_USE_BARCODE 1
 
-/** FreeType library */
 #define LV_USE_FREETYPE 0
-#if LV_USE_FREETYPE
-    /** Let FreeType use LVGL memory and file porting */
-    #define LV_FREETYPE_USE_LVGL_PORT 0
-
-    /** Cache count of glyphs in FreeType, i.e. number of glyphs that can be cached.
-     *  The higher the value, the more memory will be used. */
-    #define LV_FREETYPE_CACHE_FT_GLYPH_CNT 256
-#endif
 
 /** Built-in TTF decoder */
 #define LV_USE_TINY_TTF 1

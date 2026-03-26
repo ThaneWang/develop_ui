@@ -45,7 +45,6 @@ option(LV_USE_DRAW_SDL "Use SDL draw unit" OFF)
 option(LV_USE_LIBPNG "Use libpng to decode PNG" OFF)
 option(LV_USE_LIBJPEG_TURBO "Use libjpeg turbo to decode JPEG" OFF)
 option(LV_USE_FFMPEG "Use libffmpeg to display video using lv_ffmpeg" OFF)
-option(LV_USE_FREETYPE "Use freetype library" OFF)
 
 # Set C and C++ standards
 set(CMAKE_C_STANDARD 99)
@@ -81,14 +80,25 @@ else()
     list(APPEND MAIN_SOURCES src/main.c)
 endif()
 
-#添加自定义的ui程序进编译
-    list(APPEND MAIN_SOURCES src/ui/ui.c)
+#添加自定义的ui程序进编译（入口 ui.c；页面/事件/导航拆分）
+    list(APPEND MAIN_SOURCES
+        src/noto_sans_sc_16.c
+        src/ui/ui.c
+        src/ui/ui_font.c
+        src/ui/ui_i18n.c
+        src/ui/ui_style.c
+        src/ui/ui_events.c
+        src/ui/ui_nav.c
+        src/ui/ui_page_main.c
+        src/ui/ui_page_replay.c
+    )
     list(APPEND MAIN_SOURCES src/logging.c)
 
 if(NOT MSVC)
     list(APPEND MAIN_LIBS m pthread)
 endif()
 
+set(CMAKE_CMAKE_PATH "D:\\LVGL\\cmake-4.1.2-windows-x86_64\\bin\\cmake.exe")
 # Custom target to run the executable
 add_custom_target(run COMMAND ${EXECUTABLE_OUTPUT_PATH}/main DEPENDS main)
 
@@ -117,13 +127,6 @@ endif()
 # Conditionally include and link FFmpeg libraries if LV_USE_FFMPEG is enabled
 if(LV_USE_FFMPEG)
     list(APPEND MAIN_LIBS avformat avcodec avutil swscale z)
-endif()
-
-# Conditionally include and link FreeType if LV_USE_FREETYPE is enabled
-if(LV_USE_FREETYPE)
-    find_package(Freetype REQUIRED)
-    target_include_directories(lvgl PUBLIC ${FREETYPE_INCLUDE_DIRS})
-    list(APPEND MAIN_LIBS ${FREETYPE_LIBRARIES})
 endif()
 
 if(LVGL_PRO_PROJECT_DIR)
