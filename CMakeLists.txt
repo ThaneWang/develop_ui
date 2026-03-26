@@ -84,11 +84,13 @@ endif()
     list(APPEND MAIN_SOURCES
         src/noto_sans_sc_16.c
         src/ui/ui.c
+        src/ui/ui_boot.c
         src/ui/ui_font.c
         src/ui/ui_i18n.c
         src/ui/ui_style.c
         src/ui/ui_events.c
         src/ui/ui_nav.c
+        src/ui/ui_display.c
         src/ui/ui_page_main.c
         src/ui/ui_page_replay.c
     )

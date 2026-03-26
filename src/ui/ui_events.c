@@ -64,7 +64,7 @@ void ui_evt_replay_zuohua_pointer_cb(lv_event_t *e)
     const int dx = rel.x - s_huifang_press.x;
     const int dy = rel.y - s_huifang_press.y;
 
-    if(dx <= -UI_SWIPE_MIN_DX && LV_ABS(dy) <= UI_SWIPE_MAX_ABS_DY && LV_ABS(dx) > LV_ABS(dy)) {
+    if(dx <= -UI_SWIPE_COMMIT_DX && LV_ABS(dy) <= UI_SWIPE_MAX_ABS_DY && LV_ABS(dx) > LV_ABS(dy)) {
         printf("用户左滑返回主页\n");
         LOG_DEBUG("用户左滑返回主页");
         lv_async_call(ui_nav_replace_with_main_async, NULL);

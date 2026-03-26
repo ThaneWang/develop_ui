@@ -1,0 +1,127 @@
+/**
+ * @file ui_boot.c
+ * @brief 全屏开机动画：标题渐显、进度条、转圈，结束后淡出并进入 `ui_page_main_create`。
+ */
+#include "ui_boot.h"
+#include "ui.h"
+#include "ui_page_main.h"
+#include "../logging.h"
+#include "lvgl/lvgl.h"
+
+#define UI_BOOT_BAR_MS    2200
+#define UI_BOOT_FADE_MS   420
+#define UI_BOOT_TITLE_MS  3000
+
+static lv_obj_t *s_boot_root;
+
+static void boot_fade_opa_cb(void *var, int32_t v)
+{
+    lv_obj_set_style_opa((lv_obj_t *)var, (lv_opa_t)v, LV_PART_MAIN);
+}
+
+static void boot_bar_value_cb(void *var, int32_t v)
+{
+    lv_bar_set_value((lv_obj_t *)var, (int32_t)v, LV_ANIM_OFF);
+}
+
+static void boot_fade_done_cb(lv_anim_t *a)
+{
+    LV_UNUSED(a);
+    if(s_boot_root == NULL || !lv_obj_is_valid(s_boot_root)) {
+        s_boot_root = NULL;
+        ui_page_main_create(lv_scr_act());
+        return;
+    }
+    lv_obj_t *scr = lv_obj_get_screen(s_boot_root);
+    s_boot_root = NULL;
+    lv_obj_clean(scr);
+    ui_page_main_create(scr);
+    LOG_DEBUG("开机动画结束，进入主界面");
+}
+
+static void boot_bar_done_cb(lv_anim_t *a)
+{
+    LV_UNUSED(a);
+    if(s_boot_root == NULL || !lv_obj_is_valid(s_boot_root)) {
+        return;
+    }
+    lv_anim_t fade;
+    lv_anim_init(&fade);
+    lv_anim_set_var(&fade, s_boot_root);
+    lv_anim_set_values(&fade, LV_OPA_COVER, LV_OPA_TRANSP);
+    lv_anim_set_exec_cb(&fade, boot_fade_opa_cb);
+    lv_anim_set_duration(&fade, UI_BOOT_FADE_MS);
+    lv_anim_set_path_cb(&fade, lv_anim_path_ease_in);
+    lv_anim_set_completed_cb(&fade, boot_fade_done_cb);
+    lv_anim_start(&fade);
+}
+
+static void boot_title_opa_cb(void *var, int32_t v)
+{
+    lv_obj_set_style_opa((lv_obj_t *)var, (lv_opa_t)v, LV_PART_MAIN);
+}
+
+void ui_boot_show_then_main(void)
+{
+    lv_obj_t *scr = lv_scr_act();
+    lv_obj_clean(scr);
+
+    s_boot_root = lv_obj_create(scr);
+    lv_obj_set_size(s_boot_root, MY_SCREEN_WIDTH, MY_SCREEN_HEIGHT);
+    lv_obj_set_pos(s_boot_root, 0, 0);
+    lv_obj_set_style_bg_color(s_boot_root, lv_color_hex(0x12121c), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_boot_root, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_boot_root, 0, LV_PART_MAIN);
+    lv_obj_remove_flag(s_boot_root, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = lv_label_create(s_boot_root);
+    lv_label_set_text_static(title, "LVGL Camera");
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_set_style_text_color(title, lv_color_hex(0xe8e8f0), LV_PART_MAIN);
+    lv_obj_set_style_opa(title, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_align(title, LV_ALIGN_CENTER, 0, -72);
+
+    lv_anim_t title_anim;
+    lv_anim_init(&title_anim);
+    lv_anim_set_var(&title_anim, title);
+    lv_anim_set_values(&title_anim, LV_OPA_TRANSP, LV_OPA_COVER);
+    lv_anim_set_exec_cb(&title_anim, boot_title_opa_cb);
+    lv_anim_set_duration(&title_anim, UI_BOOT_TITLE_MS);
+    lv_anim_set_path_cb(&title_anim, lv_anim_path_ease_out);
+    lv_anim_start(&title_anim);
+
+    lv_obj_t *sub = lv_label_create(s_boot_root);
+    lv_label_set_text_static(sub, "Starting...");
+    lv_obj_set_style_text_font(sub, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(sub, lv_color_hex(0x8888a0), LV_PART_MAIN);
+    lv_obj_align(sub, LV_ALIGN_CENTER, 0, -38);
+
+    lv_obj_t *bar = lv_bar_create(s_boot_root);
+    lv_obj_set_size(bar, MY_SCREEN_WIDTH - 120, 8);
+    lv_obj_align(bar, LV_ALIGN_CENTER, 0, 28);
+    lv_bar_set_range(bar, 0, 100);
+    lv_bar_set_value(bar, 0, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(0x2a2a3a), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(0x5b7fd9), LV_PART_INDICATOR);
+    lv_obj_set_style_radius(bar, 4, LV_PART_MAIN);
+    lv_obj_set_style_radius(bar, 4, LV_PART_INDICATOR);
+
+    lv_obj_t *spin = lv_spinner_create(s_boot_root);
+    lv_obj_set_size(spin, 48, 48);
+    lv_obj_align(spin, LV_ALIGN_CENTER, 0, 88);
+    lv_obj_set_style_arc_color(spin, lv_color_hex(0x5b7fd9), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(spin, 4, LV_PART_INDICATOR);
+    lv_spinner_set_anim_params(spin, 900, 200);
+
+    lv_anim_t bar_anim;
+    lv_anim_init(&bar_anim);
+    lv_anim_set_var(&bar_anim, bar);
+    lv_anim_set_values(&bar_anim, 0, 100);
+    lv_anim_set_exec_cb(&bar_anim, boot_bar_value_cb);
+    lv_anim_set_duration(&bar_anim, UI_BOOT_BAR_MS);
+    lv_anim_set_path_cb(&bar_anim, lv_anim_path_ease_in_out);
+    lv_anim_set_completed_cb(&bar_anim, boot_bar_done_cb);
+    lv_anim_start(&bar_anim);
+
+    LOG_DEBUG("开机动画开始");
+}

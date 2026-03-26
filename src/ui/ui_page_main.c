@@ -2,10 +2,12 @@
  * @file ui_page_main.c
  * @brief 相机主界面：状态栏、预览区、底栏；预览区手势(右滑回放/左滑 ISP/下拉全屏控制中心/上滑模式页)；控制中心 8 宫格与系统设置子页。
  * 可翻译文案经 `ui_i18n_bind_label()` 绑定；符号与 Montserrat 专用字体仍用 static 文本。
+ * 主屏区划文案无底色、换行与滚动见 `ui_label_i18n_wrap` / `ui_region_strip_enable_scroll` 及 `.cursor/rules.md`「1.1」。
  * @note 滑动手势与阈值约定见 **`.cursor/ui_swipe_gestures.md`**。
  */
 #include "ui_page_main.h"
 #include "ui_common.h"
+#include "ui_display.h"
 #include "ui_events.h"
 #include "ui_i18n.h"
 #include "ui_nav.h"
@@ -15,6 +17,10 @@
 #include "lvgl/lvgl.h"
 #include "lvgl/src/layouts/grid/lv_grid.h"
 
+#if UI_FEATURE_DISPLAY_ROTATION
+static void cc_show_rotation_view(void);
+#endif
+
 static lv_obj_t *s_isp;
 static lv_obj_t *s_cc_dim;
 static lv_obj_t *s_cc_sheet;
@@ -22,6 +28,14 @@ static lv_obj_t *s_mode;
 static lv_obj_t *s_cc_lang_dd;
 static lv_obj_t *s_cc_grid;
 static lv_obj_t *s_cc_settings;
+#if UI_FEATURE_DISPLAY_ROTATION
+static lv_obj_t *s_cc_rotation_panel;
+static lv_obj_t *s_cc_rot_switch;
+static lv_obj_t *s_cc_rot_angle_list;
+static lv_obj_t *s_cc_rot_angle_btns[4];
+static bool s_cc_rot_enabled;
+static uint8_t s_cc_rot_sel_idx;
+#endif
 static bool s_isp_open;
 static bool s_cc_open;
 static bool s_mode_open;
@@ -31,6 +45,27 @@ static int32_t s_cc_sheet_h;
 static lv_point_t s_vp_press;
 /** 主预览区：是否跟踪到有效 RELEASED（与 PRESS_LOST 配对） */
 static bool s_vp_tracking;
+
+typedef enum {
+    MAIN_VP_DIR_NONE = 0,
+    MAIN_VP_DIR_RIGHT,
+    MAIN_VP_DIR_LEFT,
+    MAIN_VP_DIR_DOWN,
+    MAIN_VP_DIR_UP,
+} main_vp_dir_t;
+
+/** 当前手势锁定的方向（全屏手势，PRESSING 跟手预览） */
+static main_vp_dir_t s_vp_dir;
+/** 下拉控制中心跟手预览中（尚未 `s_cc_open`） */
+static bool s_vp_cc_drag;
+/** 上滑模式页跟手预览 */
+static bool s_vp_mode_preview;
+/** 左滑 ISP 跟手预览（仅从未展开状态拖出） */
+static bool s_vp_isp_preview;
+/** 右滑回放预显条（无点击，不挡触摸） */
+static lv_obj_t *s_vp_replay_peek;
+/** 全屏宽、仅中间带高的透明层：眼睛与手势提示相对「主内容区」几何中心固定，不随 ISP 列宽变化 */
+static lv_obj_t *s_vp_decor_layer;
 
 static const lv_style_prop_t s_cc_lang_hit_tr_props[] = {
     LV_STYLE_TRANSFORM_SCALE_X,
@@ -127,6 +162,11 @@ static const int32_t s_cc_grid_row_dsc[] = {
 /** 控制中心：显示 8 宫格，隐藏系统设置子页 */
 static void cc_show_grid_view(void)
 {
+#if UI_FEATURE_DISPLAY_ROTATION
+    if(s_cc_rotation_panel != NULL && lv_obj_is_valid(s_cc_rotation_panel)) {
+        lv_obj_add_flag(s_cc_rotation_panel, LV_OBJ_FLAG_HIDDEN);
+    }
+#endif
     if(s_cc_grid != NULL && lv_obj_is_valid(s_cc_grid)) {
         lv_obj_clear_flag(s_cc_grid, LV_OBJ_FLAG_HIDDEN);
     }
@@ -138,6 +178,11 @@ static void cc_show_grid_view(void)
 /** 控制中心：显示系统设置子页，隐藏宫格 */
 static void cc_show_settings_view(void)
 {
+#if UI_FEATURE_DISPLAY_ROTATION
+    if(s_cc_rotation_panel != NULL && lv_obj_is_valid(s_cc_rotation_panel)) {
+        lv_obj_add_flag(s_cc_rotation_panel, LV_OBJ_FLAG_HIDDEN);
+    }
+#endif
     if(s_cc_grid != NULL && lv_obj_is_valid(s_cc_grid)) {
         lv_obj_add_flag(s_cc_grid, LV_OBJ_FLAG_HIDDEN);
     }
@@ -178,6 +223,14 @@ static void cc_tile_clicked_cb(lv_event_t *e)
         LOG_DEBUG("CC: system settings opened");
         return;
     }
+#if UI_FEATURE_DISPLAY_ROTATION
+    if(idx == 0u) {
+        cc_show_rotation_view();
+        printf("[CC] %s -> rotation panel\n", ui_i18n_str(s_cc_tile_str_ids[idx]));
+        LOG_DEBUG("CC: rotation panel opened");
+        return;
+    }
+#endif
     printf("[CC] %s effect triggered\n", ui_i18n_str(s_cc_tile_str_ids[idx]));
     LOG_DEBUG("CC tile: %s triggered", ui_i18n_str(s_cc_tile_str_ids[idx]));
 }
@@ -219,15 +272,29 @@ static void main_set_isp_open(bool open)
         }
         s_isp_open = true;
         lv_obj_clear_flag(s_isp, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_width(s_isp, 0);
-        lv_obj_update_layout(lv_obj_get_parent(s_isp));
+        lv_coord_t w0 = lv_obj_get_width(s_isp);
+        if(w0 < 1) {
+            w0 = 0;
+            lv_obj_set_width(s_isp, 0);
+        }
+        lv_obj_t *mid = lv_obj_get_parent(s_isp);
+        if(mid) {
+            lv_obj_update_layout(mid);
+        }
+        if(w0 >= UI_SIDE_PANEL_W) {
+            lv_obj_set_width(s_isp, UI_SIDE_PANEL_W);
+            if(mid) {
+                lv_obj_update_layout(mid);
+            }
+            return;
+        }
 
         lv_anim_t anim;
         lv_anim_init(&anim);
         lv_anim_set_var(&anim, s_isp);
-        lv_anim_set_values(&anim, 0, UI_SIDE_PANEL_W);
+        lv_anim_set_values(&anim, w0, UI_SIDE_PANEL_W);
         lv_anim_set_exec_cb(&anim, isp_width_anim_cb);
-        lv_anim_set_duration(&anim, 220);
+        lv_anim_set_duration(&anim, w0 > 0 ? 120 : 220);
         lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
         lv_anim_start(&anim);
     }
@@ -367,7 +434,7 @@ static void cc_sheet_swipe_dismiss_cb(lv_event_t *e)
     lv_indev_get_point(indev, &rel);
     const int dx = rel.x - s_cc_swipe_press.x;
     const int dy = rel.y - s_cc_swipe_press.y;
-    if(-dy >= UI_SWIPE_MIN_DY && LV_ABS(dx) <= UI_SWIPE_MAX_ABS_DX && LV_ABS(dy) > LV_ABS(dx)) {
+    if(-dy >= UI_SWIPE_COMMIT_DY && LV_ABS(dx) <= UI_SWIPE_MAX_ABS_DX && LV_ABS(dy) > LV_ABS(dx)) {
         LOG_DEBUG("控制中心上滑关闭");
         main_show_control_center(false);
     }
@@ -423,7 +490,7 @@ static void mode_panel_gesture_cb(lv_event_t *e)
     lv_indev_get_point(indev, &rel);
     const int dx = rel.x - press.x;
     const int dy = rel.y - press.y;
-    if(dy >= UI_SWIPE_MIN_DY && LV_ABS(dx) <= UI_SWIPE_MAX_ABS_DY && dy > LV_ABS(dx)) {
+    if(dy >= UI_SWIPE_COMMIT_DY && LV_ABS(dx) <= UI_SWIPE_MAX_ABS_DX && dy > LV_ABS(dx)) {
         main_show_mode_panel(false);
     }
 }
@@ -478,31 +545,362 @@ static void main_show_mode_panel(bool show)
     }
 }
 
+static void main_replay_peek_ensure(lv_obj_t *scr)
+{
+    if(s_vp_replay_peek != NULL && lv_obj_is_valid(s_vp_replay_peek)) {
+        return;
+    }
+    s_vp_replay_peek = lv_obj_create(scr);
+    lv_obj_remove_flag(s_vp_replay_peek, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(s_vp_replay_peek, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(s_vp_replay_peek, 0, MY_SCREEN_HEIGHT);
+    lv_obj_align(s_vp_replay_peek, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_color(s_vp_replay_peek, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_vp_replay_peek, LV_OPA_40, 0);
+    lv_obj_set_style_border_width(s_vp_replay_peek, 0, 0);
+    lv_obj_add_flag(s_vp_replay_peek, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void main_replay_peek_set(int32_t permille)
+{
+    if(s_vp_replay_peek == NULL || !lv_obj_is_valid(s_vp_replay_peek)) {
+        return;
+    }
+    if(permille <= 0) {
+        lv_obj_add_flag(s_vp_replay_peek, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_width(s_vp_replay_peek, 0);
+        return;
+    }
+    lv_coord_t w = (lv_coord_t)((int32_t)UI_SWIPE_COMMIT_DX * LV_MIN(permille, 1000) / 1000);
+    if(w < 1) {
+        w = 1;
+    }
+    lv_obj_set_width(s_vp_replay_peek, w);
+    lv_obj_clear_flag(s_vp_replay_peek, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_vp_replay_peek);
+}
+
+static void main_cc_apply_drag_permille(int32_t permille)
+{
+    if(s_cc_dim == NULL || s_cc_sheet == NULL || s_cc_sheet_h <= 0 || s_cc_open) {
+        return;
+    }
+    if(permille <= 0) {
+        s_vp_cc_drag = false;
+        lv_anim_delete(s_cc_sheet, cc_sheet_y_anim_cb);
+        lv_obj_add_flag(s_cc_dim, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_cc_sheet, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_y(s_cc_sheet, -s_cc_sheet_h);
+        return;
+    }
+    s_vp_cc_drag = true;
+    lv_anim_delete(s_cc_sheet, cc_sheet_y_anim_cb);
+    lv_obj_clear_flag(s_cc_dim, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_cc_sheet, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_cc_dim);
+    lv_obj_move_foreground(s_cc_sheet);
+    const int32_t y = -s_cc_sheet_h + (permille * (int32_t)s_cc_sheet_h) / 1000;
+    lv_obj_set_y(s_cc_sheet, (lv_coord_t)y);
+    lv_obj_set_style_bg_opa(s_cc_dim, (lv_opa_t)((int32_t)LV_OPA_50 * LV_MIN(permille, 1000) / 1000), 0);
+}
+
+static void main_cc_commit_from_drag(void)
+{
+    if(s_cc_dim == NULL || s_cc_sheet == NULL || s_cc_sheet_h <= 0) {
+        return;
+    }
+    lv_anim_delete(s_cc_sheet, cc_sheet_y_anim_cb);
+    s_vp_cc_drag = false;
+    s_cc_open = true;
+    cc_show_grid_view();
+    lv_obj_clear_flag(s_cc_dim, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_cc_sheet, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_cc_dim);
+    lv_obj_move_foreground(s_cc_sheet);
+    lv_obj_set_y(s_cc_sheet, 0);
+    lv_obj_set_style_bg_opa(s_cc_dim, LV_OPA_50, 0);
+    cc_lang_dd_sync_from_i18n();
+}
+
+static void vp_cc_drag_cancel_done_cb(lv_anim_t *a)
+{
+    LV_UNUSED(a);
+    s_vp_cc_drag = false;
+    if(!s_cc_open) {
+        if(s_cc_dim != NULL && lv_obj_is_valid(s_cc_dim)) {
+            lv_obj_set_style_bg_opa(s_cc_dim, LV_OPA_50, 0);
+            lv_obj_add_flag(s_cc_dim, LV_OBJ_FLAG_HIDDEN);
+        }
+        if(s_cc_sheet != NULL && lv_obj_is_valid(s_cc_sheet)) {
+            lv_obj_add_flag(s_cc_sheet, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+static void main_cc_cancel_drag_anim(void)
+{
+    if(!s_vp_cc_drag || s_cc_open || s_cc_sheet == NULL) {
+        s_vp_cc_drag = false;
+        return;
+    }
+    lv_anim_delete(s_cc_sheet, cc_sheet_y_anim_cb);
+    lv_coord_t y0 = lv_obj_get_y(s_cc_sheet);
+    lv_anim_t anim;
+    lv_anim_init(&anim);
+    lv_anim_set_var(&anim, s_cc_sheet);
+    lv_anim_set_values(&anim, y0, -s_cc_sheet_h);
+    lv_anim_set_exec_cb(&anim, cc_sheet_y_anim_cb);
+    lv_anim_set_duration(&anim, 160);
+    lv_anim_set_path_cb(&anim, lv_anim_path_ease_in);
+    lv_anim_set_completed_cb(&anim, vp_cc_drag_cancel_done_cb);
+    lv_anim_start(&anim);
+}
+
+static void main_mode_apply_drag_permille(int32_t permille)
+{
+    if(s_mode == NULL || s_mode_open) {
+        return;
+    }
+    if(permille <= 0) {
+        s_vp_mode_preview = false;
+        lv_anim_delete(s_mode, mode_opa_anim_cb);
+        lv_obj_add_flag(s_mode, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_opa(s_mode, LV_OPA_COVER, LV_PART_MAIN);
+        return;
+    }
+    s_vp_mode_preview = true;
+    lv_anim_delete(s_mode, mode_opa_anim_cb);
+    lv_obj_clear_flag(s_mode, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_opa(s_mode, (lv_opa_t)((int32_t)LV_OPA_COVER * LV_MIN(permille, 1000) / 1000), LV_PART_MAIN);
+    lv_obj_move_foreground(s_mode);
+}
+
+static void main_mode_commit_from_drag(void)
+{
+    if(s_mode == NULL) {
+        return;
+    }
+    lv_anim_delete(s_mode, mode_opa_anim_cb);
+    s_vp_mode_preview = false;
+    s_mode_open = true;
+    lv_obj_clear_flag(s_mode, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_opa(s_mode, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_move_foreground(s_mode);
+}
+
+static void main_isp_apply_drag_permille(int32_t permille)
+{
+    if(s_isp == NULL || s_isp_open) {
+        return;
+    }
+    if(permille <= 0) {
+        s_vp_isp_preview = false;
+        lv_anim_delete(s_isp, isp_width_anim_cb);
+        lv_obj_set_width(s_isp, 0);
+        lv_obj_add_flag(s_isp, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_t *mid = lv_obj_get_parent(s_isp);
+        if(mid) {
+            lv_obj_update_layout(mid);
+        }
+        return;
+    }
+    s_vp_isp_preview = true;
+    lv_anim_delete(s_isp, isp_width_anim_cb);
+    lv_obj_clear_flag(s_isp, LV_OBJ_FLAG_HIDDEN);
+    lv_coord_t w = (lv_coord_t)((int32_t)UI_SIDE_PANEL_W * LV_MIN(permille, 1000) / 1000);
+    lv_obj_set_width(s_isp, w);
+    lv_obj_t *mid = lv_obj_get_parent(s_isp);
+    if(mid) {
+        lv_obj_update_layout(mid);
+    }
+}
+
+static int32_t main_vp_permille_for_dir(main_vp_dir_t dir, int dx, int dy)
+{
+    switch(dir) {
+        case MAIN_VP_DIR_RIGHT:
+            return (dx > 0) ? (int32_t)dx * 1000 / UI_SWIPE_COMMIT_DX : 0;
+        case MAIN_VP_DIR_LEFT:
+            return (dx < 0) ? (int32_t)(-dx) * 1000 / UI_SWIPE_COMMIT_DX : 0;
+        case MAIN_VP_DIR_DOWN:
+            return (dy > 0) ? (int32_t)dy * 1000 / UI_SWIPE_COMMIT_DY : 0;
+        case MAIN_VP_DIR_UP:
+            return (dy < 0) ? (int32_t)(-dy) * 1000 / UI_SWIPE_COMMIT_DY : 0;
+        default:
+            return 0;
+    }
+}
+
+static bool main_vp_cross_axis_bad(main_vp_dir_t dir, int adx, int ady)
+{
+    switch(dir) {
+        case MAIN_VP_DIR_RIGHT:
+        case MAIN_VP_DIR_LEFT:
+            return ady > UI_SWIPE_MAX_ABS_DY;
+        case MAIN_VP_DIR_DOWN:
+        case MAIN_VP_DIR_UP:
+            return adx > UI_SWIPE_MAX_ABS_DX;
+        default:
+            return false;
+    }
+}
+
+static bool main_vp_release_commit_ok(main_vp_dir_t dir, int dx, int dy)
+{
+    const int adx = LV_ABS(dx);
+    const int ady = LV_ABS(dy);
+    if(dir == MAIN_VP_DIR_NONE) {
+        return false;
+    }
+    if(main_vp_cross_axis_bad(dir, adx, ady)) {
+        return false;
+    }
+    switch(dir) {
+        case MAIN_VP_DIR_RIGHT:
+            return dx >= UI_SWIPE_COMMIT_DX && ady <= UI_SWIPE_MAX_ABS_DY && dx > ady;
+        case MAIN_VP_DIR_LEFT:
+            return (-dx) >= UI_SWIPE_COMMIT_DX && ady <= UI_SWIPE_MAX_ABS_DY && (-dx) > ady;
+        case MAIN_VP_DIR_DOWN:
+            return dy >= UI_SWIPE_COMMIT_DY && adx <= UI_SWIPE_MAX_ABS_DX && dy > adx;
+        case MAIN_VP_DIR_UP:
+            return (-dy) >= UI_SWIPE_COMMIT_DY && adx <= UI_SWIPE_MAX_ABS_DX && (-dy) > adx;
+        default:
+            return false;
+    }
+}
+
+static void main_vp_cancel_drag(bool instant)
+{
+    s_vp_dir = MAIN_VP_DIR_NONE;
+
+    main_replay_peek_set(0);
+    main_mode_apply_drag_permille(0);
+    main_isp_apply_drag_permille(0);
+
+    if(s_vp_cc_drag && !s_cc_open && s_cc_sheet != NULL) {
+        if(instant) {
+            lv_anim_delete(s_cc_sheet, cc_sheet_y_anim_cb);
+            s_vp_cc_drag = false;
+            lv_obj_add_flag(s_cc_dim, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(s_cc_sheet, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_y(s_cc_sheet, -s_cc_sheet_h);
+            lv_obj_set_style_bg_opa(s_cc_dim, LV_OPA_50, 0);
+        }
+        else {
+            main_cc_cancel_drag_anim();
+        }
+    }
+    else {
+        s_vp_cc_drag = false;
+    }
+}
+
 /**
- * @brief 主预览区四向滑动手势。
+ * @brief 主界面全屏四向滑动手势（绑定在 `scr` + 子控件 EVENT_BUBBLE）。
  *
- * 流程：PRESSED 记点 → PRESS_LOST 放弃 → RELEASED 算 dx/dy。
- * 先滤除微小移动（|dx|、|dy| 均小于各自 MIN 则忽略）。
- * 再按主方向分支：|dx| >= |dy| 为横向（右滑回放、左滑 ISP），否则为纵向（下拉控制中心、上滑模式页）。
- * 各分支内再校验对应 MIN 与正交轴 MAX，并要求主方向位移严格大于另一轴（与回放左滑、控制中心上滑公式一致）。
+ * PRESSED 记点；PRESSING 按锁定方向跟手预览（位移达屏宽/高 1/5 为满行程）；RELEASED 达到提交条件则进入对应页。
+ * 控制中心/模式层打开时不处理，避免与覆盖层冲突。
  */
 static void main_viewport_gesture_cb(lv_event_t *e)
 {
+    lv_obj_t *scr = lv_event_get_user_data(e);
     lv_event_code_t code = lv_event_get_code(e);
     lv_indev_t *indev = lv_indev_active();
     if(indev == NULL) {
         return;
     }
 
+    if(s_cc_open || s_mode_open) {
+        if(code == LV_EVENT_PRESSED || code == LV_EVENT_PRESS_LOST) {
+            s_vp_tracking = false;
+            s_vp_dir = MAIN_VP_DIR_NONE;
+        }
+        return;
+    }
+
     if(code == LV_EVENT_PRESSED) {
+        main_vp_cancel_drag(true);
         lv_indev_get_point(indev, &s_vp_press);
         s_vp_tracking = true;
+        s_vp_dir = MAIN_VP_DIR_NONE;
         return;
     }
+
     if(code == LV_EVENT_PRESS_LOST) {
         s_vp_tracking = false;
+        main_vp_cancel_drag(false);
+        s_vp_dir = MAIN_VP_DIR_NONE;
         return;
     }
+
+    if(code == LV_EVENT_PRESSING && s_vp_tracking) {
+        lv_point_t cur;
+        lv_indev_get_point(indev, &cur);
+        const int dx = cur.x - s_vp_press.x;
+        const int dy = cur.y - s_vp_press.y;
+        const int adx = LV_ABS(dx);
+        const int ady = LV_ABS(dy);
+
+        if(s_vp_dir == MAIN_VP_DIR_NONE) {
+            if(adx < UI_SWIPE_DIR_LOCK_PX && ady < UI_SWIPE_DIR_LOCK_PX) {
+                return;
+            }
+            if(adx >= ady) {
+                s_vp_dir = (dx > 0) ? MAIN_VP_DIR_RIGHT : MAIN_VP_DIR_LEFT;
+            }
+            else {
+                s_vp_dir = (dy > 0) ? MAIN_VP_DIR_DOWN : MAIN_VP_DIR_UP;
+            }
+        }
+
+        if(main_vp_cross_axis_bad(s_vp_dir, adx, ady)) {
+            s_vp_tracking = false;
+            main_vp_cancel_drag(false);
+            s_vp_dir = MAIN_VP_DIR_NONE;
+            return;
+        }
+
+        int32_t pm = main_vp_permille_for_dir(s_vp_dir, dx, dy);
+        if(pm > 1000) {
+            pm = 1000;
+        }
+
+        switch(s_vp_dir) {
+            case MAIN_VP_DIR_RIGHT:
+                if(scr != NULL) {
+                    main_replay_peek_ensure(scr);
+                }
+                main_replay_peek_set(pm);
+                main_cc_apply_drag_permille(0);
+                main_mode_apply_drag_permille(0);
+                main_isp_apply_drag_permille(0);
+                break;
+            case MAIN_VP_DIR_LEFT:
+                main_replay_peek_set(0);
+                main_cc_apply_drag_permille(0);
+                main_mode_apply_drag_permille(0);
+                if(!s_isp_open) {
+                    main_isp_apply_drag_permille(pm);
+                }
+                break;
+            case MAIN_VP_DIR_DOWN:
+                main_replay_peek_set(0);
+                main_mode_apply_drag_permille(0);
+                main_isp_apply_drag_permille(0);
+                main_cc_apply_drag_permille(pm);
+                break;
+            case MAIN_VP_DIR_UP:
+                main_replay_peek_set(0);
+                main_cc_apply_drag_permille(0);
+                main_isp_apply_drag_permille(0);
+                main_mode_apply_drag_permille(pm);
+                break;
+            default:
+                break;
+        }
+        return;
+    }
+
     if(code != LV_EVENT_RELEASED || !s_vp_tracking) {
         return;
     }
@@ -512,34 +910,339 @@ static void main_viewport_gesture_cb(lv_event_t *e)
     lv_indev_get_point(indev, &rel);
     const int dx = rel.x - s_vp_press.x;
     const int dy = rel.y - s_vp_press.y;
-    const int adx = LV_ABS(dx);
-    const int ady = LV_ABS(dy);
+    const int adxr = LV_ABS(dx);
+    const int adyr = LV_ABS(dy);
 
-    if(adx < UI_SWIPE_MIN_DX && ady < UI_SWIPE_MIN_DY) {
+    if(s_vp_dir == MAIN_VP_DIR_NONE) {
+        if(adxr < UI_SWIPE_DIR_LOCK_PX && adyr < UI_SWIPE_DIR_LOCK_PX) {
+            main_vp_cancel_drag(false);
+            s_vp_dir = MAIN_VP_DIR_NONE;
+            return;
+        }
+        if(adxr >= adyr) {
+            s_vp_dir = (dx > 0) ? MAIN_VP_DIR_RIGHT : MAIN_VP_DIR_LEFT;
+        }
+        else {
+            s_vp_dir = (dy > 0) ? MAIN_VP_DIR_DOWN : MAIN_VP_DIR_UP;
+        }
+    }
+
+    if(main_vp_cross_axis_bad(s_vp_dir, adxr, adyr)) {
+        main_vp_cancel_drag(false);
+        s_vp_dir = MAIN_VP_DIR_NONE;
         return;
     }
 
-    if(adx >= ady) {
-        if(dx >= UI_SWIPE_MIN_DX && ady <= UI_SWIPE_MAX_ABS_DY && dx > ady) {
-            LOG_DEBUG("用户右滑");
-            lv_async_call(ui_nav_replace_with_replay_async, NULL);
-        }
-        else if(-dx >= UI_SWIPE_MIN_DX && ady <= UI_SWIPE_MAX_ABS_DY && -dx > ady) {
-            LOG_DEBUG("左滑 ISP");
-            main_set_isp_open(!s_isp_open);
+    const bool commit = main_vp_release_commit_ok(s_vp_dir, dx, dy);
+
+    if(commit) {
+        switch(s_vp_dir) {
+            case MAIN_VP_DIR_RIGHT:
+                LOG_DEBUG("用户右滑");
+                main_replay_peek_set(0);
+                main_cc_apply_drag_permille(0);
+                main_mode_apply_drag_permille(0);
+                main_isp_apply_drag_permille(0);
+                s_vp_cc_drag = false;
+                lv_async_call(ui_nav_replace_with_replay_async, NULL);
+                break;
+            case MAIN_VP_DIR_LEFT:
+                LOG_DEBUG("左滑 ISP");
+                main_replay_peek_set(0);
+                main_cc_apply_drag_permille(0);
+                main_mode_apply_drag_permille(0);
+                s_vp_isp_preview = false;
+                main_set_isp_open(!s_isp_open);
+                break;
+            case MAIN_VP_DIR_DOWN:
+                LOG_DEBUG("下拉控制中心");
+                main_replay_peek_set(0);
+                main_mode_apply_drag_permille(0);
+                main_isp_apply_drag_permille(0);
+                if(!s_cc_open) {
+                    main_cc_commit_from_drag();
+                }
+                break;
+            case MAIN_VP_DIR_UP:
+                LOG_DEBUG("上滑模式参数");
+                main_replay_peek_set(0);
+                main_cc_apply_drag_permille(0);
+                main_isp_apply_drag_permille(0);
+                if(!s_mode_open) {
+                    main_mode_commit_from_drag();
+                }
+                break;
+            default:
+                main_vp_cancel_drag(false);
+                break;
         }
     }
     else {
-        if(dy >= UI_SWIPE_MIN_DY && adx <= UI_SWIPE_MAX_ABS_DX && dy > adx) {
-            LOG_DEBUG("下拉控制中心");
-            main_show_control_center(true);
+        main_vp_cancel_drag(false);
+    }
+    s_vp_dir = MAIN_VP_DIR_NONE;
+}
+
+#if UI_FEATURE_DISPLAY_ROTATION
+
+/*
+ * 用户语义是“顺时针 0/90/180/270”，而 LVGL 显示旋转方向与绘制角度定义相反。
+ * 这里做映射：CW90 -> LV_DISPLAY_ROTATION_270，CW270 -> LV_DISPLAY_ROTATION_90。
+ */
+static const lv_display_rotation_t s_cc_rot_map[4] = {
+    LV_DISPLAY_ROTATION_0,
+    LV_DISPLAY_ROTATION_270,
+    LV_DISPLAY_ROTATION_180,
+    LV_DISPLAY_ROTATION_90,
+};
+
+static void cc_rot_sync_from_display(void)
+{
+    lv_display_t *d = lv_display_get_default();
+    if(d == NULL) {
+        return;
+    }
+    const lv_display_rotation_t r = lv_display_get_rotation(d);
+    s_cc_rot_enabled = (r != LV_DISPLAY_ROTATION_0);
+    switch(r) {
+        case LV_DISPLAY_ROTATION_0:
+            s_cc_rot_sel_idx = 0;
+            break;
+        case LV_DISPLAY_ROTATION_270: /* CW 90 */
+            s_cc_rot_sel_idx = 1;
+            break;
+        case LV_DISPLAY_ROTATION_180:
+            s_cc_rot_sel_idx = 2;
+            break;
+        case LV_DISPLAY_ROTATION_90: /* CW 270 */
+            s_cc_rot_sel_idx = 3;
+            break;
+        default:
+            s_cc_rot_sel_idx = 0;
+            break;
+    }
+}
+
+static void cc_rot_refresh_angle_focus(void)
+{
+    for(unsigned i = 0; i < 4; i++) {
+        lv_obj_t *b = s_cc_rot_angle_btns[i];
+        if(b == NULL || !lv_obj_is_valid(b)) {
+            continue;
         }
-        else if(-dy >= UI_SWIPE_MIN_DY && adx <= UI_SWIPE_MAX_ABS_DX && -dy > adx) {
-            LOG_DEBUG("上滑模式参数");
-            main_show_mode_panel(true);
+        if(i == s_cc_rot_sel_idx) {
+            lv_obj_set_style_outline_width(b, 3, 0);
+            lv_obj_set_style_outline_opa(b, LV_OPA_COVER, 0);
+            lv_obj_set_style_outline_color(b, lv_palette_main(LV_PALETTE_BLUE), 0);
+            lv_obj_set_style_outline_pad(b, 2, 0);
+        }
+        else {
+            lv_obj_set_style_outline_width(b, 0, 0);
+            lv_obj_set_style_outline_opa(b, LV_OPA_TRANSP, 0);
         }
     }
 }
+
+static void cc_rot_apply_from_ui(void)
+{
+    if(!s_cc_rot_enabled) {
+        ui_display_apply_rotation(LV_DISPLAY_ROTATION_0);
+        return;
+    }
+    ui_display_apply_rotation(s_cc_rot_map[s_cc_rot_sel_idx]);
+    lv_obj_t *scr = lv_scr_act();
+    if(scr != NULL && lv_obj_is_valid(scr)) {
+        lv_obj_update_layout(scr);
+    }
+}
+
+static void cc_rot_angle_clicked_cb(lv_event_t *e)
+{
+    if(lv_event_get_code(e) != LV_EVENT_CLICKED) {
+        return;
+    }
+    const unsigned i = (unsigned)(uintptr_t)lv_event_get_user_data(e);
+    if(i >= 4) {
+        return;
+    }
+    s_cc_rot_sel_idx = (uint8_t)i;
+    cc_rot_refresh_angle_focus();
+    cc_rot_apply_from_ui();
+}
+
+static void cc_rot_switch_changed_cb(lv_event_t *e)
+{
+    if(lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
+        return;
+    }
+    lv_obj_t *sw = lv_event_get_target(e);
+    s_cc_rot_enabled = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    if(s_cc_rot_angle_list != NULL && lv_obj_is_valid(s_cc_rot_angle_list)) {
+        if(s_cc_rot_enabled) {
+            lv_obj_remove_flag(s_cc_rot_angle_list, LV_OBJ_FLAG_HIDDEN);
+        }
+        else {
+            lv_obj_add_flag(s_cc_rot_angle_list, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    cc_rot_apply_from_ui();
+}
+
+static void cc_rotation_back_cb(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    cc_show_grid_view();
+}
+
+static void cc_show_rotation_view(void)
+{
+    if(s_cc_rotation_panel == NULL || !lv_obj_is_valid(s_cc_rotation_panel)) {
+        return;
+    }
+    cc_rot_sync_from_display();
+    if(s_cc_grid != NULL && lv_obj_is_valid(s_cc_grid)) {
+        lv_obj_add_flag(s_cc_grid, LV_OBJ_FLAG_HIDDEN);
+    }
+    if(s_cc_settings != NULL && lv_obj_is_valid(s_cc_settings)) {
+        lv_obj_add_flag(s_cc_settings, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_remove_flag(s_cc_rotation_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_cc_rotation_panel);
+    if(s_cc_rot_switch != NULL && lv_obj_is_valid(s_cc_rot_switch)) {
+        if(s_cc_rot_enabled) {
+            lv_obj_add_state(s_cc_rot_switch, LV_STATE_CHECKED);
+        }
+        else {
+            lv_obj_remove_state(s_cc_rot_switch, LV_STATE_CHECKED);
+        }
+    }
+    if(s_cc_rot_angle_list != NULL && lv_obj_is_valid(s_cc_rot_angle_list)) {
+        if(s_cc_rot_enabled) {
+            lv_obj_remove_flag(s_cc_rot_angle_list, LV_OBJ_FLAG_HIDDEN);
+        }
+        else {
+            lv_obj_add_flag(s_cc_rot_angle_list, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    cc_rot_refresh_angle_focus();
+}
+
+static void main_cc_create_rotation_panel(lv_obj_t *cc_body)
+{
+    s_cc_rotation_panel = lv_obj_create(cc_body);
+    lv_obj_set_size(s_cc_rotation_panel, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(s_cc_rotation_panel, lv_color_hex(0xF0F0F0), 0);
+    lv_obj_set_style_border_width(s_cc_rotation_panel, 0, 0);
+    lv_obj_set_style_pad_all(s_cc_rotation_panel, 8, 0);
+    lv_obj_remove_flag(s_cc_rotation_panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(s_cc_rotation_panel, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(s_cc_rotation_panel, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_add_flag(s_cc_rotation_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_layout(s_cc_rotation_panel, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(s_cc_rotation_panel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(s_cc_rotation_panel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(s_cc_rotation_panel, 10, 0);
+
+    lv_obj_t *rh = lv_obj_create(s_cc_rotation_panel);
+    lv_obj_set_width(rh, LV_PCT(100));
+    lv_obj_set_height(rh, 48);
+    lv_obj_set_style_bg_opa(rh, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(rh, 0, 0);
+    lv_obj_remove_flag(rh, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(rh, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(rh, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_set_layout(rh, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(rh, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(rh, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(rh, 12, 0);
+
+    lv_obj_t *rb = lv_obj_create(rh);
+    lv_obj_set_size(rb, 72, 40);
+    lv_obj_set_style_bg_color(rb, lv_color_hex(0xDDDDDD), 0);
+    lv_obj_set_style_border_width(rb, 0, 0);
+    lv_obj_remove_flag(rb, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(rb, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(rb, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_add_event_cb(rb, cc_rotation_back_cb, LV_EVENT_CLICKED, NULL);
+    cc_lang_ctrl_apply_focus_visual(rb);
+    lv_obj_t *rbl = lv_label_create(rb);
+    ui_i18n_bind_label(rbl, UI_STR_SETTINGS_BACK);
+    lv_label_set_long_mode(rbl, LV_LABEL_LONG_CLIP);
+    ui_style_zone_label(rbl);
+    lv_obj_center(rbl);
+
+    lv_obj_t *rt = lv_label_create(rh);
+    ui_i18n_bind_label(rt, UI_STR_CC_ROT_TITLE);
+    lv_label_set_long_mode(rt, LV_LABEL_LONG_CLIP);
+    ui_style_zone_label(rt);
+    lv_obj_set_flex_grow(rt, 1);
+
+    lv_obj_t *en_row = lv_obj_create(s_cc_rotation_panel);
+    lv_obj_set_width(en_row, LV_PCT(100));
+    lv_obj_set_height(en_row, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(en_row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(en_row, 0, 0);
+    lv_obj_remove_flag(en_row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(en_row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(en_row, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_set_layout(en_row, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(en_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(en_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(en_row, 12, 0);
+
+    lv_obj_t *en_lbl = lv_label_create(en_row);
+    ui_i18n_bind_label(en_lbl, UI_STR_CC_ROT_ENABLE);
+    ui_label_i18n_wrap(en_lbl, MY_SCREEN_WIDTH - 120);
+    lv_obj_set_flex_grow(en_lbl, 1);
+
+    s_cc_rot_switch = lv_switch_create(en_row);
+    lv_obj_add_flag(s_cc_rot_switch, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_add_event_cb(s_cc_rot_switch, cc_rot_switch_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    cc_lang_ctrl_apply_focus_visual(s_cc_rot_switch);
+
+    s_cc_rot_angle_list = lv_obj_create(s_cc_rotation_panel);
+    lv_obj_set_width(s_cc_rot_angle_list, LV_PCT(100));
+    lv_obj_set_flex_grow(s_cc_rot_angle_list, 1);
+    lv_obj_set_style_bg_opa(s_cc_rot_angle_list, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(s_cc_rot_angle_list, 0, 0);
+    lv_obj_remove_flag(s_cc_rot_angle_list, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(s_cc_rot_angle_list, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(s_cc_rot_angle_list, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_set_layout(s_cc_rot_angle_list, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(s_cc_rot_angle_list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(s_cc_rot_angle_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(s_cc_rot_angle_list, 8, 0);
+    lv_obj_add_flag(s_cc_rot_angle_list, LV_OBJ_FLAG_HIDDEN);
+
+    static const ui_str_id_t angle_ids[4] = {
+        UI_STR_CC_ROT_ANGLE_0,
+        UI_STR_CC_ROT_ANGLE_90,
+        UI_STR_CC_ROT_ANGLE_180,
+        UI_STR_CC_ROT_ANGLE_270,
+    };
+    for(unsigned i = 0; i < 4; i++) {
+        lv_obj_t *b = lv_obj_create(s_cc_rot_angle_list);
+        s_cc_rot_angle_btns[i] = b;
+        lv_obj_set_width(b, LV_PCT(100));
+        lv_obj_set_height(b, 44);
+        lv_obj_set_style_bg_color(b, lv_color_hex(UI_ZONE_CYAN), 0);
+        lv_obj_set_style_radius(b, 8, 0);
+        lv_obj_set_style_border_width(b, 0, 0);
+        lv_obj_remove_flag(b, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(b, LV_OBJ_FLAG_EVENT_BUBBLE);
+        cc_lang_ctrl_apply_focus_visual(b);
+        lv_obj_add_event_cb(b, cc_rot_angle_clicked_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
+        lv_obj_t *bl = lv_label_create(b);
+        ui_i18n_bind_label(bl, angle_ids[i]);
+        lv_label_set_long_mode(bl, LV_LABEL_LONG_CLIP);
+        ui_style_zone_label(bl);
+        lv_obj_center(bl);
+    }
+    cc_rot_refresh_angle_focus();
+}
+
+#endif /* UI_FEATURE_DISPLAY_ROTATION */
 
 /**
  * @brief 创建全屏控制中心：遮罩、sheet、宫格与设置子页。
@@ -753,6 +1456,10 @@ static void main_create_control_center(lv_obj_t *scr)
         lv_obj_align(rl, LV_ALIGN_LEFT_MID, 12, 0);
     }
 
+#if UI_FEATURE_DISPLAY_ROTATION
+    main_cc_create_rotation_panel(cc_body);
+#endif
+
     lv_obj_add_event_cb(s_cc_sheet, cc_sheet_swipe_dismiss_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_add_event_cb(s_cc_sheet, cc_sheet_swipe_dismiss_cb, LV_EVENT_RELEASED, NULL);
     lv_obj_add_event_cb(s_cc_sheet, cc_sheet_swipe_dismiss_cb, LV_EVENT_PRESS_LOST, NULL);
@@ -776,16 +1483,13 @@ static void main_create_mode_panel(lv_obj_t *scr)
 
     lv_obj_t *title = lv_label_create(s_mode);
     ui_i18n_bind_label(title, UI_STR_MODE_TITLE);
-    lv_label_set_long_mode(title, LV_LABEL_LONG_CLIP);
-    ui_style_zone_label(title);
+    ui_label_i18n_wrap(title, MY_SCREEN_WIDTH - 96);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 16);
 
     lv_obj_t *body = lv_label_create(s_mode);
     ui_i18n_bind_label(body, UI_STR_MODE_BODY);
-    lv_label_set_long_mode(body, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(body, MY_SCREEN_WIDTH - 32);
-    ui_style_zone_label(body);
-    lv_obj_align(body, LV_ALIGN_CENTER, 0, 0);
+    ui_label_i18n_wrap(body, MY_SCREEN_WIDTH - 32);
+    lv_obj_align_to(body, title, LV_ALIGN_OUT_BOTTOM_MID, 0, 12);
 
     lv_obj_t *close_btn = lv_obj_create(s_mode);
     lv_obj_set_size(close_btn, 72, 40);
@@ -804,9 +1508,105 @@ static void main_create_mode_panel(lv_obj_t *scr)
     s_mode_open = false;
 }
 
+/** 预览区手势说明一行：纯文案 Label + 箭头符号，不参与触摸/冒泡（字条展示） */
+static void main_vp_hint_row(lv_obj_t *col, ui_str_id_t gest_id, const char *sym, ui_str_id_t act_id)
+{
+    lv_obj_t *row = lv_obj_create(col);
+    lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_column(row, 10, 0);
+    lv_obj_set_layout(row, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_width(row, LV_PCT(100));
+    lv_obj_set_height(row, LV_SIZE_CONTENT);
+
+    lv_obj_t *lg = lv_label_create(row);
+    ui_i18n_bind_label(lg, gest_id);
+    ui_style_zone_label(lg);
+    lv_label_set_long_mode(lg, LV_LABEL_LONG_WRAP);
+    lv_obj_remove_flag(lg, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_width(lg, LV_PCT(40));
+    lv_obj_set_style_text_align(lg, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
+    lv_obj_set_flex_grow(lg, 1);
+
+    lv_obj_t *ic = lv_label_create(row);
+    lv_label_set_text_static(ic, sym);
+    lv_obj_set_style_text_font(ic, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(ic, lv_color_hex(0x4480e8), 0);
+    lv_obj_set_style_text_align(ic, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_label_set_long_mode(ic, LV_LABEL_LONG_CLIP);
+    lv_obj_remove_flag(ic, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_width(ic, 28);
+
+    lv_obj_t *la = lv_label_create(row);
+    ui_i18n_bind_label(la, act_id);
+    ui_style_zone_label(la);
+    lv_label_set_long_mode(la, LV_LABEL_LONG_WRAP);
+    lv_obj_remove_flag(la, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_width(la, LV_PCT(40));
+    lv_obj_set_style_text_align(la, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
+    lv_obj_set_flex_grow(la, 1);
+}
+
+/** 在 parent 下添加四行手势提示列（纯展示字条，无滚动、无触摸） */
+static lv_obj_t *main_vp_add_hint_column(lv_obj_t *parent)
+{
+    lv_obj_t *gcol = lv_obj_create(parent);
+    lv_obj_remove_flag(gcol, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_width(gcol, LV_PCT(100));
+    lv_obj_set_height(gcol, LV_SIZE_CONTENT);
+    lv_obj_set_style_max_height(gcol, 260, 0);
+    lv_obj_set_style_bg_opa(gcol, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(gcol, 0, 0);
+    lv_obj_set_style_pad_row(gcol, 6, 0);
+    lv_obj_set_layout(gcol, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(gcol, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(gcol, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
+
+    main_vp_hint_row(gcol, UI_STR_VP_GEST_RIGHT, LV_SYMBOL_RIGHT, UI_STR_VP_ACT_REPLAY);
+    main_vp_hint_row(gcol, UI_STR_VP_GEST_LEFT, LV_SYMBOL_LEFT, UI_STR_VP_ACT_ISP);
+    main_vp_hint_row(gcol, UI_STR_VP_GEST_DOWN, LV_SYMBOL_DOWN, UI_STR_VP_ACT_CC);
+    main_vp_hint_row(gcol, UI_STR_VP_GEST_UP, LV_SYMBOL_UP, UI_STR_VP_ACT_MODE);
+    return gcol;
+}
+
+/**
+ * 在 scr 上建透明层（仅顶栏与底栏之间的全屏宽条带），眼睛与提示相对**该条带**几何中心对齐。
+ * 与 `mid`/ISP 列宽无关，左滑展开 ISP 时装饰不随中间列平移；层不接收点击，手势仍落到下层。
+ */
+static void main_scr_build_preview_decor(lv_obj_t *scr, lv_coord_t mid_h)
+{
+    s_vp_decor_layer = lv_obj_create(scr);
+    lv_obj_set_size(s_vp_decor_layer, MY_SCREEN_WIDTH, mid_h);
+    lv_obj_align(s_vp_decor_layer, LV_ALIGN_TOP_MID, 0, UI_TOP_BAR_H);
+    lv_obj_set_style_bg_opa(s_vp_decor_layer, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(s_vp_decor_layer, 0, 0);
+    lv_obj_remove_flag(s_vp_decor_layer, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *eye = lv_label_create(s_vp_decor_layer);
+    lv_label_set_text_static(eye, LV_SYMBOL_EYE_OPEN);
+    lv_label_set_long_mode(eye, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_color(eye, lv_color_hex(0x7dce9a), 0);
+    lv_obj_set_style_text_font(eye, &lv_font_montserrat_40, 0);
+    lv_obj_remove_flag(eye, LV_OBJ_FLAG_CLICKABLE);
+    /* 整体上移，避免四行提示在条带下半部被裁切或贴底栏 */
+    lv_obj_align(eye, LV_ALIGN_CENTER, 0, -110);
+
+    lv_obj_t *gcol = main_vp_add_hint_column(s_vp_decor_layer);
+    lv_obj_set_width(gcol, MY_SCREEN_WIDTH - 40);
+    lv_obj_update_layout(gcol);
+    lv_obj_align_to(gcol, eye, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
+}
+
 void ui_page_main_create(lv_obj_t *scr)
 {
     ui_i18n_reset_bindings();
+
+#if UI_FEATURE_DISPLAY_ROTATION
+    ui_display_apply_rotation(LV_DISPLAY_ROTATION_0);
+#endif
 
     s_isp = NULL;
     s_cc_dim = NULL;
@@ -815,42 +1615,51 @@ void ui_page_main_create(lv_obj_t *scr)
     s_cc_lang_dd = NULL;
     s_cc_grid = NULL;
     s_cc_settings = NULL;
+#if UI_FEATURE_DISPLAY_ROTATION
+    s_cc_rotation_panel = NULL;
+    s_cc_rot_switch = NULL;
+    s_cc_rot_angle_list = NULL;
+    for(unsigned ri = 0; ri < 4; ri++) {
+        s_cc_rot_angle_btns[ri] = NULL;
+    }
+    s_cc_rot_enabled = false;
+    s_cc_rot_sel_idx = 0;
+#endif
     s_isp_open = false;
     s_cc_open = false;
     s_mode_open = false;
     s_cc_sheet_h = 0;
+    s_vp_dir = MAIN_VP_DIR_NONE;
+    s_vp_cc_drag = false;
+    s_vp_mode_preview = false;
+    s_vp_isp_preview = false;
+    s_vp_replay_peek = NULL;
+    s_vp_decor_layer = NULL;
 
     lv_obj_set_style_bg_color(scr, lv_color_white(), 0);
     lv_obj_set_style_pad_all(scr, 0, 0);
 
-    lv_obj_t *note = lv_obj_create(scr);
-    lv_obj_set_size(note, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_align(note, LV_ALIGN_TOP_LEFT, 8, 8);
-    lv_obj_set_style_bg_color(note, lv_color_white(), 0);
-    lv_obj_set_style_border_color(note, lv_color_hex(0xCCCCCC), 0);
-    lv_obj_set_style_border_width(note, 1, 0);
-    lv_obj_set_style_pad_all(note, 6, 0);
-    lv_obj_t *note_l = lv_label_create(note);
-    ui_i18n_bind_label(note_l, UI_STR_NOTE);
-    lv_label_set_long_mode(note_l, LV_LABEL_LONG_CLIP);
-    ui_style_zone_label(note_l);
-
     const int mid_h = MY_SCREEN_HEIGHT - UI_TOP_BAR_H - UI_BOTTOM_BAR_H;
 
     lv_obj_t *status = lv_obj_create(scr);
+    lv_obj_add_flag(status, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_set_size(status, MY_SCREEN_WIDTH, UI_TOP_BAR_H);
     lv_obj_align(status, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_style_bg_color(status, lv_color_hex(UI_ZONE_CYAN), 0);
+    lv_obj_set_style_bg_opa(status, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(status, 0, 0);
+    lv_obj_set_style_pad_hor(status, 8, 0);
+    lv_obj_set_style_pad_ver(status, 4, 0);
     lv_obj_remove_flag(status, LV_OBJ_FLAG_SCROLLABLE);
+    ui_region_strip_enable_scroll(status);
     lv_obj_t *status_l = lv_label_create(status);
     ui_i18n_bind_label(status_l, UI_STR_STATUS_ZONE);
-    lv_label_set_long_mode(status_l, LV_LABEL_LONG_CLIP);
-    ui_style_zone_label(status_l);
-    lv_obj_center(status_l);
+    ui_label_i18n_wrap(status_l, MY_SCREEN_WIDTH - 16);
+    lv_obj_set_style_text_align(status_l, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_align(status_l, LV_ALIGN_TOP_MID, 0, 4);
     lv_obj_add_event_cb(status, ui_evt_zone_click_cb, LV_EVENT_CLICKED, (void *)"状态区");
 
     lv_obj_t *mid = lv_obj_create(scr);
+    lv_obj_add_flag(mid, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_set_size(mid, MY_SCREEN_WIDTH, mid_h);
     lv_obj_align(mid, LV_ALIGN_TOP_MID, 0, UI_TOP_BAR_H);
     lv_obj_set_style_bg_opa(mid, LV_OPA_TRANSP, 0);
@@ -862,68 +1671,46 @@ void ui_page_main_create(lv_obj_t *scr)
     lv_obj_set_flex_align(mid, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     lv_obj_t *reserved = lv_obj_create(mid);
+    lv_obj_add_flag(reserved, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_set_size(reserved, UI_SIDE_PANEL_W, LV_PCT(100));
-    lv_obj_set_style_bg_color(reserved, lv_color_hex(UI_ZONE_CYAN), 0);
+    lv_obj_set_style_bg_opa(reserved, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(reserved, 0, 0);
+    lv_obj_set_style_pad_ver(reserved, 6, 0);
     lv_obj_remove_flag(reserved, LV_OBJ_FLAG_SCROLLABLE);
+    ui_region_strip_enable_scroll(reserved);
     lv_obj_t *reserved_l = lv_label_create(reserved);
     ui_i18n_bind_label(reserved_l, UI_STR_RESERVED_ZONE);
-    lv_label_set_long_mode(reserved_l, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(reserved_l, UI_SIDE_PANEL_W - 8);
-    ui_style_zone_label(reserved_l);
-    lv_obj_center(reserved_l);
+    ui_label_i18n_wrap(reserved_l, UI_SIDE_PANEL_W - 8);
+    lv_obj_align(reserved_l, LV_ALIGN_TOP_MID, 0, 4);
     lv_obj_add_event_cb(reserved, ui_evt_zone_click_cb, LV_EVENT_CLICKED, (void *)"预留区");
 
     lv_obj_t *viewport = lv_obj_create(mid);
+    lv_obj_add_flag(viewport, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_set_flex_grow(viewport, 1);
-    lv_obj_set_style_bg_color(viewport, lv_color_white(), 0);
-    lv_obj_set_style_border_width(viewport, 1, 0);
-    lv_obj_set_style_border_color(viewport, lv_color_hex(0xDDDDDD), 0);
+    lv_obj_set_style_bg_opa(viewport, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(viewport, 0, 0);
     lv_obj_remove_flag(viewport, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(viewport, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(viewport, main_viewport_gesture_cb, LV_EVENT_PRESSED, NULL);
-    lv_obj_add_event_cb(viewport, main_viewport_gesture_cb, LV_EVENT_RELEASED, NULL);
-    lv_obj_add_event_cb(viewport, main_viewport_gesture_cb, LV_EVENT_PRESS_LOST, NULL);
-
-    lv_obj_t *eye = lv_label_create(viewport);
-    lv_label_set_text_static(eye, LV_SYMBOL_EYE_OPEN);
-    lv_label_set_long_mode(eye, LV_LABEL_LONG_CLIP);
-    lv_obj_set_style_text_color(eye, lv_color_hex(0x90EE90), 0);
-    lv_obj_set_style_text_font(eye, &lv_font_montserrat_48, 0);
-    lv_obj_center(eye);
-
-    lv_obj_t *youhua_row = lv_obj_create(viewport);
-    lv_obj_set_size(youhua_row, LV_PCT(100), 56);
-    lv_obj_align(youhua_row, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_remove_flag(youhua_row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_remove_flag(youhua_row, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_bg_opa(youhua_row, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(youhua_row, 0, 0);
-    lv_obj_set_style_pad_all(youhua_row, 4, 0);
-
-    lv_obj_t *youhua_shibie = lv_label_create(youhua_row);
-    ui_i18n_bind_label(youhua_shibie, UI_STR_SWIPE_RIGHT_REPLAY);
-    lv_label_set_long_mode(youhua_shibie, LV_LABEL_LONG_CLIP);
-    lv_obj_set_width(youhua_shibie, LV_PCT(100));
-    ui_style_zone_label(youhua_shibie);
-    lv_obj_set_style_text_align(youhua_shibie, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_center(youhua_shibie);
 
     s_isp = lv_obj_create(mid);
+    lv_obj_add_flag(s_isp, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_set_size(s_isp, 0, LV_PCT(100));
-    lv_obj_set_style_bg_color(s_isp, lv_color_hex(UI_ZONE_CYAN), 0);
+    lv_obj_set_style_bg_opa(s_isp, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(s_isp, 0, 0);
+    lv_obj_set_style_pad_ver(s_isp, 6, 0);
     lv_obj_remove_flag(s_isp, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_isp, LV_OBJ_FLAG_HIDDEN);
+    ui_region_strip_enable_scroll(s_isp);
+    lv_obj_set_layout(s_isp, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(s_isp, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(s_isp, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_t *isp_l = lv_label_create(s_isp);
     ui_i18n_bind_label(isp_l, UI_STR_ISP_ZONE);
-    lv_label_set_long_mode(isp_l, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(isp_l, UI_SIDE_PANEL_W - 8);
-    ui_style_zone_label(isp_l);
-    lv_obj_center(isp_l);
+    ui_label_i18n_wrap(isp_l, UI_SIDE_PANEL_W - 8);
     lv_obj_add_event_cb(s_isp, ui_evt_zone_click_cb, LV_EVENT_CLICKED, (void *)"ISP参数显示区域");
 
     lv_obj_t *bottom = lv_obj_create(scr);
+    lv_obj_add_flag(bottom, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_set_size(bottom, MY_SCREEN_WIDTH, UI_BOTTOM_BAR_H);
     lv_obj_align(bottom, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_set_style_bg_opa(bottom, LV_OPA_TRANSP, 0);
@@ -947,21 +1734,31 @@ void ui_page_main_create(lv_obj_t *scr)
 
     for(size_t i = 0; i < 3; i++) {
         lv_obj_t *cell = lv_obj_create(bottom);
+        lv_obj_add_flag(cell, LV_OBJ_FLAG_EVENT_BUBBLE);
         lv_obj_set_flex_grow(cell, 1);
         lv_obj_set_height(cell, LV_PCT(100));
-        lv_obj_set_style_bg_color(cell, lv_color_hex(UI_ZONE_CYAN), 0);
+        lv_obj_set_style_bg_opa(cell, LV_OPA_TRANSP, 0);
         lv_obj_set_style_border_width(cell, 0, 0);
+        lv_obj_set_style_pad_hor(cell, 6, 0);
+        lv_obj_set_style_pad_ver(cell, 4, 0);
         lv_obj_remove_flag(cell, LV_OBJ_FLAG_SCROLLABLE);
+        ui_region_strip_enable_scroll(cell);
         lv_obj_t *cell_l = lv_label_create(cell);
         ui_i18n_bind_label(cell_l, bottom_ids[i]);
-        lv_label_set_long_mode(cell_l, LV_LABEL_LONG_CLIP);
-        ui_style_zone_label(cell_l);
-        lv_obj_center(cell_l);
+        ui_label_i18n_wrap(cell_l, MY_SCREEN_WIDTH / 3 - 20);
+        lv_obj_align(cell_l, LV_ALIGN_TOP_MID, 0, 0);
+        lv_obj_set_style_text_align(cell_l, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
         lv_obj_add_event_cb(cell, ui_evt_zone_click_cb, LV_EVENT_CLICKED, (void *)bottom_dbg[i]);
     }
+
+    main_scr_build_preview_decor(scr, mid_h);
+    lv_obj_move_foreground(s_vp_decor_layer);
 
     main_create_control_center(scr);
     main_create_mode_panel(scr);
 
-    lv_obj_move_foreground(note);
+    lv_obj_add_event_cb(scr, main_viewport_gesture_cb, LV_EVENT_PRESSED, scr);
+    lv_obj_add_event_cb(scr, main_viewport_gesture_cb, LV_EVENT_PRESSING, scr);
+    lv_obj_add_event_cb(scr, main_viewport_gesture_cb, LV_EVENT_RELEASED, scr);
+    lv_obj_add_event_cb(scr, main_viewport_gesture_cb, LV_EVENT_PRESS_LOST, scr);
 }

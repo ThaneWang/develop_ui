@@ -12,11 +12,17 @@ typedef struct {
 } ui_i18n_binding_t;
 
 static const char *const s_zh[UI_STR_COUNT] = {
-    [UI_STR_NOTE] = "预览区:右滑回放/左滑ISP/下拉控制中心/上滑模式",
     [UI_STR_STATUS_ZONE] = "状态区",
     [UI_STR_RESERVED_ZONE] = "预留区",
     [UI_STR_ISP_ZONE] = "ISP参数显示区域",
-    [UI_STR_SWIPE_RIGHT_REPLAY] = "用户右滑识别(向右拖动)",
+    [UI_STR_VP_GEST_RIGHT] = "右滑",
+    [UI_STR_VP_ACT_REPLAY] = "回放",
+    [UI_STR_VP_GEST_LEFT] = "左滑",
+    [UI_STR_VP_ACT_ISP] = "ISP",
+    [UI_STR_VP_GEST_DOWN] = "下拉",
+    [UI_STR_VP_ACT_CC] = "控制中心",
+    [UI_STR_VP_GEST_UP] = "上滑",
+    [UI_STR_VP_ACT_MODE] = "模式",
     [UI_STR_BOTTOM_MODE_DISP] = "模式显示区",
     [UI_STR_BOTTOM_MODE_PARAM] = "模式参数区",
     [UI_STR_BOTTOM_VIEW_CTRL] = "视图控制",
@@ -25,6 +31,12 @@ static const char *const s_zh[UI_STR_COUNT] = {
     [UI_STR_CC_TITLE] = "控制中心",
     [UI_STR_CC_LANG_LABEL] = "语言",
     [UI_STR_CC_TILE_ROTATION] = "旋转方向锁定/开启",
+    [UI_STR_CC_ROT_TITLE] = "旋转方向",
+    [UI_STR_CC_ROT_ENABLE] = "启用屏幕旋转",
+    [UI_STR_CC_ROT_ANGLE_0] = "0°（360°）",
+    [UI_STR_CC_ROT_ANGLE_90] = "90°",
+    [UI_STR_CC_ROT_ANGLE_180] = "180°",
+    [UI_STR_CC_ROT_ANGLE_270] = "270°",
     [UI_STR_CC_TILE_LOCK_SCREEN] = "锁定屏幕",
     [UI_STR_CC_TILE_VOICE] = "语音控制",
     [UI_STR_CC_TILE_SYSTEM] = "系统设置",
@@ -42,11 +54,17 @@ static const char *const s_zh[UI_STR_COUNT] = {
 };
 
 static const char *const s_en[UI_STR_COUNT] = {
-    [UI_STR_NOTE] = "Viewport: R=replay L=ISP down=CC up=mode",
     [UI_STR_STATUS_ZONE] = "Status",
     [UI_STR_RESERVED_ZONE] = "Reserved",
     [UI_STR_ISP_ZONE] = "ISP parameters",
-    [UI_STR_SWIPE_RIGHT_REPLAY] = "Swipe right for replay",
+    [UI_STR_VP_GEST_RIGHT] = "Swipe right",
+    [UI_STR_VP_ACT_REPLAY] = "Replay",
+    [UI_STR_VP_GEST_LEFT] = "Swipe left",
+    [UI_STR_VP_ACT_ISP] = "ISP",
+    [UI_STR_VP_GEST_DOWN] = "Pull down",
+    [UI_STR_VP_ACT_CC] = "Control center",
+    [UI_STR_VP_GEST_UP] = "Swipe up",
+    [UI_STR_VP_ACT_MODE] = "Mode",
     [UI_STR_BOTTOM_MODE_DISP] = "Mode display",
     [UI_STR_BOTTOM_MODE_PARAM] = "Mode settings",
     [UI_STR_BOTTOM_VIEW_CTRL] = "View control",
@@ -55,6 +73,12 @@ static const char *const s_en[UI_STR_COUNT] = {
     [UI_STR_CC_TITLE] = "Control Center",
     [UI_STR_CC_LANG_LABEL] = "Language",
     [UI_STR_CC_TILE_ROTATION] = "Rotation lock",
+    [UI_STR_CC_ROT_TITLE] = "Display rotation",
+    [UI_STR_CC_ROT_ENABLE] = "Enable display rotation",
+    [UI_STR_CC_ROT_ANGLE_0] = "0° (360°)",
+    [UI_STR_CC_ROT_ANGLE_90] = "90°",
+    [UI_STR_CC_ROT_ANGLE_180] = "180°",
+    [UI_STR_CC_ROT_ANGLE_270] = "270°",
     [UI_STR_CC_TILE_LOCK_SCREEN] = "Lock screen",
     [UI_STR_CC_TILE_VOICE] = "Voice control",
     [UI_STR_CC_TILE_SYSTEM] = "System settings",
@@ -122,6 +146,10 @@ void ui_i18n_refresh_all(void)
         if(lb != NULL && lv_obj_is_valid(lb)) {
             lv_label_set_text(lb, ui_i18n_str(s_bindings[i].id));
         }
+    }
+    lv_obj_t *scr = lv_scr_act();
+    if(scr != NULL && lv_obj_is_valid(scr)) {
+        lv_obj_update_layout(scr);
     }
 }
 

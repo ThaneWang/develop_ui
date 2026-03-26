@@ -6,6 +6,7 @@
 #include "ui_i18n.h"
 #include "ui_page_main.h"
 #include "ui_page_replay.h"
+#include "ui_display.h"
 #include "../logging.h"
 #include "lvgl/lvgl.h"
 
@@ -13,6 +14,7 @@ void ui_nav_replace_with_replay_async(void *user_data)
 {
     LV_UNUSED(user_data);
     lv_obj_t *scr = lv_scr_act();
+    ui_display_apply_rotation(LV_DISPLAY_ROTATION_0);
     ui_i18n_reset_bindings();
     lv_obj_clean(scr);
     ui_page_replay_create(scr);

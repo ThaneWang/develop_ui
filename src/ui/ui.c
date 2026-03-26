@@ -4,15 +4,15 @@
  */
 #include "ui.h"
 #include "../logging.h"
-#include "ui_page_main.h"
+#include "ui_boot.h"
 
 #if UI_DEVELOP
 
 void my_ui_init(void)
 {
     LOG_DEBUG("my_ui_init（UI_DEVELOP）");
-    ui_page_main_create(lv_scr_act());
-    LOG_DEBUG("交互布局 UI 已初始化");
+    ui_boot_show_then_main();
+    LOG_DEBUG("交互布局 UI 已初始化（含开机动画入口）");
 }
 
 #else
