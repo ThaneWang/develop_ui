@@ -21,6 +21,9 @@
 static void cc_show_rotation_view(void);
 #endif
 
+static void cc_sync_settings_list_geom(void);
+static void cc_settings_list_scroll_end_cb(lv_event_t *e);
+
 static lv_obj_t *s_isp;
 static lv_obj_t *s_cc_dim;
 static lv_obj_t *s_cc_sheet;
@@ -28,6 +31,10 @@ static lv_obj_t *s_mode;
 static lv_obj_t *s_cc_lang_dd;
 static lv_obj_t *s_cc_grid;
 static lv_obj_t *s_cc_settings;
+/** 系统设置页可滚动列表（用于高度同步、滚动预览、与上滑关闭手势区分） */
+static lv_obj_t *s_cc_set_list;
+/** 控制中心 `PRESSED` 时记录列表 `scroll_y`，用于判断本次手势是否为列表滚动 */
+static int32_t s_cc_setlist_scroll_y_at_press;
 #if UI_FEATURE_DISPLAY_ROTATION
 static lv_obj_t *s_cc_rotation_panel;
 static lv_obj_t *s_cc_rot_switch;
@@ -189,6 +196,7 @@ static void cc_show_settings_view(void)
     if(s_cc_settings != NULL && lv_obj_is_valid(s_cc_settings)) {
         lv_obj_clear_flag(s_cc_settings, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(s_cc_settings);
+        cc_sync_settings_list_geom();
     }
 }
 
@@ -202,12 +210,73 @@ static void cc_settings_back_cb(lv_event_t *e)
     cc_show_grid_view();
 }
 
-/** 系统设置列表项点击（占位日志） */
+/** 系统设置列表项点击：占位，仅打印（对齐 `docs/firmware-fw-v1-framework.md` §5/§6） */
 static void cc_settings_item_clicked_cb(lv_event_t *e)
 {
     const ui_str_id_t id = (ui_str_id_t)(uintptr_t)lv_event_get_user_data(e);
-    printf("[Settings] %s event triggered\n", ui_i18n_str(id));
-    LOG_DEBUG("Settings: %s triggered", ui_i18n_str(id));
+    printf("[Settings] tap id=%d \"%s\"\n", (int)id, ui_i18n_str(id));
+    LOG_DEBUG("Settings tap id=%d %s", (int)id, ui_i18n_str(id));
+}
+
+/** 根据 `s_cc_settings` 子控件高度，为列表分配剩余高度，使内容可纵向滚动 */
+static void cc_sync_settings_list_geom(void)
+{
+    if(s_cc_settings == NULL || s_cc_set_list == NULL) {
+        return;
+    }
+    if(!lv_obj_is_valid(s_cc_settings) || !lv_obj_is_valid(s_cc_set_list)) {
+        return;
+    }
+    lv_obj_update_layout(s_cc_settings);
+    lv_obj_t *hdr = lv_obj_get_child(s_cc_settings, 0);
+    if(hdr == NULL) {
+        return;
+    }
+    const lv_coord_t h_set = lv_obj_get_height(s_cc_settings);
+    const lv_coord_t pad_top = lv_obj_get_style_pad_top(s_cc_settings, 0);
+    const lv_coord_t pad_bot = lv_obj_get_style_pad_bottom(s_cc_settings, 0);
+    const lv_coord_t pad_row = lv_obj_get_style_pad_row(s_cc_settings, 0);
+    const lv_coord_t hdr_h = lv_obj_get_height(hdr);
+    lv_coord_t list_h = h_set - pad_top - pad_bot - hdr_h - pad_row;
+    if(list_h < 64) {
+        list_h = 64;
+    }
+    lv_obj_set_height(s_cc_set_list, list_h);
+    lv_obj_update_layout(s_cc_set_list);
+}
+
+/** 滚动结束：根据视口中心落在哪一行，打印当前「预览」项（便于下拉浏览选择） */
+static void cc_settings_list_scroll_end_cb(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    if(s_cc_set_list == NULL || !lv_obj_is_valid(s_cc_set_list)) {
+        return;
+    }
+    lv_obj_update_layout(s_cc_set_list);
+    const lv_coord_t scroll_y = lv_obj_get_scroll_y(s_cc_set_list);
+    const lv_coord_t view_h = lv_obj_get_height(s_cc_set_list);
+    if(view_h < 1) {
+        return;
+    }
+    const lv_coord_t mid_y = scroll_y + view_h / 2;
+    const uint32_t n = lv_obj_get_child_cnt(s_cc_set_list);
+    for(uint32_t i = 0; i < n; i++) {
+        lv_obj_t *row = lv_obj_get_child(s_cc_set_list, i);
+        if(row == NULL) {
+            continue;
+        }
+        const lv_coord_t y1 = lv_obj_get_y(row);
+        const lv_coord_t y2 = y1 + lv_obj_get_height(row);
+        if(mid_y >= y1 && mid_y < y2) {
+            lv_obj_t *first = lv_obj_get_child(row, 0);
+            if(first != NULL && lv_obj_check_type(first, &lv_label_class)) {
+                const char *txt = lv_label_get_text(first);
+                printf("[Settings] preview (center): \"%s\"\n", txt != NULL ? txt : "");
+                LOG_DEBUG("Settings preview: %s", txt != NULL ? txt : "");
+            }
+            break;
+        }
+    }
 }
 
 /** 控制中心宫格：点击磁贴；索引 3 进入系统设置 */
@@ -419,6 +488,12 @@ static void cc_sheet_swipe_dismiss_cb(lv_event_t *e)
     if(code == LV_EVENT_PRESSED) {
         lv_indev_get_point(indev, &s_cc_swipe_press);
         s_cc_swipe_track = true;
+        if(s_cc_set_list != NULL && lv_obj_is_valid(s_cc_set_list)) {
+            s_cc_setlist_scroll_y_at_press = lv_obj_get_scroll_y(s_cc_set_list);
+        }
+        else {
+            s_cc_setlist_scroll_y_at_press = 0;
+        }
         return;
     }
     if(code == LV_EVENT_PRESS_LOST) {
@@ -434,6 +509,13 @@ static void cc_sheet_swipe_dismiss_cb(lv_event_t *e)
     lv_indev_get_point(indev, &rel);
     const int dx = rel.x - s_cc_swipe_press.x;
     const int dy = rel.y - s_cc_swipe_press.y;
+    /* 系统设置列表发生纵向滚动时，不将手势当作「控制中心上滑关闭」 */
+    if(s_cc_set_list != NULL && lv_obj_is_valid(s_cc_set_list)) {
+        const int32_t sy = lv_obj_get_scroll_y(s_cc_set_list);
+        if(LV_ABS(sy - s_cc_setlist_scroll_y_at_press) > 5) {
+            return;
+        }
+    }
     if(-dy >= UI_SWIPE_COMMIT_DY && LV_ABS(dx) <= UI_SWIPE_MAX_ABS_DX && LV_ABS(dy) > LV_ABS(dx)) {
         LOG_DEBUG("控制中心上滑关闭");
         main_show_control_center(false);
@@ -1379,12 +1461,17 @@ static void main_create_control_center(lv_obj_t *scr)
 
     lv_obj_t *set_list = lv_obj_create(s_cc_settings);
     lv_obj_set_width(set_list, LV_PCT(100));
-    lv_obj_set_flex_grow(set_list, 1);
+    /* 高度由 `cc_sync_settings_list_geom()` 按剩余空间计算，避免 flex 将列表撑满内容导致无法滚动 */
     lv_obj_set_style_bg_opa(set_list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(set_list, 0, 0);
-    lv_obj_remove_flag(set_list, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_remove_flag(set_list, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_flag(set_list, LV_OBJ_FLAG_EVENT_BUBBLE);
+    s_cc_set_list = set_list;
+    lv_obj_add_flag(set_list, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(set_list, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(set_list, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_add_flag(set_list, LV_OBJ_FLAG_CLICKABLE);
+    /* 列表内滚动/点击勿冒泡到 s_cc_sheet，避免与上滑关闭控制中心冲突 */
+    lv_obj_remove_flag(set_list, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_add_event_cb(set_list, cc_settings_list_scroll_end_cb, LV_EVENT_SCROLL_END, NULL);
     lv_obj_set_layout(set_list, LV_LAYOUT_FLEX);
     lv_obj_set_flex_flow(set_list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(set_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -1397,6 +1484,7 @@ static void main_create_control_center(lv_obj_t *scr)
     lv_obj_set_style_border_width(lang_row, 0, 0);
     lv_obj_remove_flag(lang_row, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(lang_row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(lang_row, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_set_layout(lang_row, LV_LAYOUT_FLEX);
     lv_obj_set_flex_flow(lang_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(lang_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -1434,10 +1522,21 @@ static void main_create_control_center(lv_obj_t *scr)
 
     static const ui_str_id_t set_item_ids[] = {
         UI_STR_SETTINGS_DATETIME,
-        UI_STR_SETTINGS_FACTORY,
+        UI_STR_SETTINGS_POWER_SLEEP,
+        UI_STR_SETTINGS_BATTERY,
+        UI_STR_SETTINGS_THERMAL,
+        UI_STR_SETTINGS_SDCARD,
+        UI_STR_SETTINGS_FIRMWARE,
+        UI_STR_SETTINGS_LOG,
+        UI_STR_SETTINGS_SECURITY,
+        UI_STR_SETTINGS_BT,
+        UI_STR_SETTINGS_WIFI,
+        UI_STR_SETTINGS_USB,
+        UI_STR_SETTINGS_EXPORT,
         UI_STR_SETTINGS_DEVICE,
+        UI_STR_SETTINGS_FACTORY,
     };
-    for(unsigned j = 0; j < 3; j++) {
+    for(unsigned j = 0; j < (unsigned)(sizeof(set_item_ids) / sizeof(set_item_ids[0])); j++) {
         lv_obj_t *row = lv_obj_create(set_list);
         lv_obj_set_width(row, LV_PCT(100));
         lv_obj_set_height(row, 48);
@@ -1446,7 +1545,7 @@ static void main_create_control_center(lv_obj_t *scr)
         lv_obj_set_style_border_width(row, 0, 0);
         lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_flag(row, LV_OBJ_FLAG_EVENT_BUBBLE);
+        lv_obj_remove_flag(row, LV_OBJ_FLAG_EVENT_BUBBLE);
         lv_obj_add_event_cb(row, cc_settings_item_clicked_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)set_item_ids[j]);
         cc_lang_ctrl_apply_focus_visual(row);
         lv_obj_t *rl = lv_label_create(row);
@@ -1459,6 +1558,8 @@ static void main_create_control_center(lv_obj_t *scr)
 #if UI_FEATURE_DISPLAY_ROTATION
     main_cc_create_rotation_panel(cc_body);
 #endif
+
+    cc_sync_settings_list_geom();
 
     lv_obj_add_event_cb(s_cc_sheet, cc_sheet_swipe_dismiss_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_add_event_cb(s_cc_sheet, cc_sheet_swipe_dismiss_cb, LV_EVENT_RELEASED, NULL);
@@ -1615,6 +1716,7 @@ void ui_page_main_create(lv_obj_t *scr)
     s_cc_lang_dd = NULL;
     s_cc_grid = NULL;
     s_cc_settings = NULL;
+    s_cc_set_list = NULL;
 #if UI_FEATURE_DISPLAY_ROTATION
     s_cc_rotation_panel = NULL;
     s_cc_rot_switch = NULL;
