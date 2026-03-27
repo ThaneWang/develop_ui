@@ -104,6 +104,8 @@ endif()
         src/ui/ui_display.c
         src/ui/ui_page_main.c
         src/ui/ui_page_replay.c
+        src/ui/ui_page_bt_settings.c
+        src/ui/ui_bt_state.c
     )
     list(APPEND MAIN_SOURCES src/logging.c)
 

@@ -4,7 +4,7 @@
  */
 #include "ui_i18n.h"
 
-#define UI_I18N_MAX_BINDINGS 96
+#define UI_I18N_MAX_BINDINGS 128
 
 typedef struct {
     lv_obj_t *label;
@@ -60,6 +60,13 @@ static const char *const s_zh[UI_STR_COUNT] = {
     [UI_STR_SETTINGS_WIFI] = "Wi-Fi",
     [UI_STR_SETTINGS_USB] = "USB 与传输",
     [UI_STR_SETTINGS_EXPORT] = "文件导出",
+    [UI_STR_BT_PAGE_TITLE] = "蓝牙设置",
+    [UI_STR_BT_MASTER_SWITCH] = "蓝牙",
+    [UI_STR_BT_PAIR] = "配对",
+    [UI_STR_BT_RECONNECT] = "重连",
+    [UI_STR_BT_LOW_POWER] = "低功耗策略",
+    [UI_STR_BT_WIFI_SET] = "WiFi SSID / 设置 WiFi 密码",
+    [UI_STR_BT_STATUS_ON] = "蓝牙已开启",
     [UI_STR_MODE_TITLE] = "模式参数",
     [UI_STR_MODE_BODY] = "模式参数控制(占位)\n下滑或点关闭返回",
 };
@@ -113,6 +120,13 @@ static const char *const s_en[UI_STR_COUNT] = {
     [UI_STR_SETTINGS_WIFI] = "Wi-Fi",
     [UI_STR_SETTINGS_USB] = "USB & transfer",
     [UI_STR_SETTINGS_EXPORT] = "File export",
+    [UI_STR_BT_PAGE_TITLE] = "Bluetooth",
+    [UI_STR_BT_MASTER_SWITCH] = "Bluetooth",
+    [UI_STR_BT_PAIR] = "Pairing",
+    [UI_STR_BT_RECONNECT] = "Reconnect",
+    [UI_STR_BT_LOW_POWER] = "Low power",
+    [UI_STR_BT_WIFI_SET] = "WiFi SSID / set Wi-Fi password",
+    [UI_STR_BT_STATUS_ON] = "Bluetooth on",
     [UI_STR_MODE_TITLE] = "Mode parameters",
     [UI_STR_MODE_BODY] = "Mode control (placeholder)\nSwipe down or tap close",
 };

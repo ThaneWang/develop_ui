@@ -11,6 +11,7 @@
 #include "ui_events.h"
 #include "ui_i18n.h"
 #include "ui_nav.h"
+#include "ui_bt_state.h"
 #include "ui_style.h"
 #include "ui_font.h"
 #include "../logging.h"
@@ -210,10 +211,16 @@ static void cc_settings_back_cb(lv_event_t *e)
     cc_show_grid_view();
 }
 
-/** 系统设置列表项点击：占位，仅打印（对齐 `docs/firmware-fw-v1-framework.md` §5/§6） */
+/** 系统设置列表项点击：占位，仅打印（对齐 `docs/firmware-fw-v1-framework.md` §5/§6）；蓝牙进入独立页 */
 static void cc_settings_item_clicked_cb(lv_event_t *e)
 {
     const ui_str_id_t id = (ui_str_id_t)(uintptr_t)lv_event_get_user_data(e);
+    if(id == UI_STR_SETTINGS_BT) {
+        printf("[Settings] navigate -> Bluetooth settings\n");
+        LOG_DEBUG("Settings: open Bluetooth page");
+        lv_async_call(ui_nav_replace_with_bt_settings_async, NULL);
+        return;
+    }
     printf("[Settings] tap id=%d \"%s\"\n", (int)id, ui_i18n_str(id));
     LOG_DEBUG("Settings tap id=%d %s", (int)id, ui_i18n_str(id));
 }
@@ -1855,6 +1862,24 @@ void ui_page_main_create(lv_obj_t *scr)
 
     main_scr_build_preview_decor(scr, mid_h);
     lv_obj_move_foreground(s_vp_decor_layer);
+
+    /**
+     * 蓝牙状态字条：挂在 scr 上、置于顶栏视觉区，且不可点击。
+     * 若放在可滚动的 status 内，纵向拖动易被顶栏当成滚动，干扰「下拉控制中心」跟手（main_viewport_gesture_cb）。
+     */
+    lv_obj_t *bt_hint = lv_label_create(scr);
+    ui_i18n_bind_label(bt_hint, UI_STR_BT_STATUS_ON);
+    ui_style_zone_label(bt_hint);
+    lv_label_set_long_mode(bt_hint, LV_LABEL_LONG_CLIP);
+    lv_obj_set_width(bt_hint, 168);
+    lv_obj_set_style_text_align(bt_hint, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
+    lv_obj_align(bt_hint, LV_ALIGN_TOP_RIGHT, -6, 4);
+    lv_obj_remove_flag(bt_hint, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(bt_hint, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(bt_hint, LV_OBJ_FLAG_EVENT_BUBBLE);
+    if(!ui_bt_is_enabled()) {
+        lv_obj_add_flag(bt_hint, LV_OBJ_FLAG_HIDDEN);
+    }
 
     main_create_control_center(scr);
     main_create_mode_panel(scr);
