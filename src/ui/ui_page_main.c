@@ -3,7 +3,7 @@
  * @brief 相机主界面：状态栏、预览区、底栏；预览区手势(右滑回放/左滑 ISP/下拉全屏控制中心/上滑模式页)；控制中心 8 宫格与系统设置子页。
  * 可翻译文案经 `ui_i18n_bind_label()` 绑定；符号与 Montserrat 专用字体仍用 static 文本。
  * 主屏区划文案无底色、换行与滚动见 `ui_label_i18n_wrap` / `ui_region_strip_enable_scroll` 及 `.cursor/rules.md`「1.1」。
- * @note 滑动手势与阈值约定见 **`.cursor/ui_swipe_gestures.md`**。
+ * @note 滑动手势与阈值约定见 **`.cursor/rules/ui_swipe_gestures.md`**；FW-V1 固件章节与 UI 对照见 **`docs/firmware-fw-v1-framework.md`**、**`docs/ui-fw-v1-mapping.md`**。
  */
 #include "ui_page_main.h"
 #include "ui_common.h"
