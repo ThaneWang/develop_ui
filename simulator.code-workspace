@@ -20,18 +20,19 @@
 	},
 	// settings.json section
 	"settings": {
-		"cmake.cmakePath": "D:\\LVGL\\cmake-4.1.2-windows-x86_64\\bin\\cmake.exe",
+		// CMake 可执行文件（本机实际路径）
+		"cmake.cmakePath": "D:\\UI\\LVGL\\cmake-4.1.2-windows-x86_64\\bin\\cmake.exe",
 		"cmake.generator": "Ninja",
 		"cmake.preferredGenerators": [
 			"Ninja",
 			"MinGW Makefiles"
 		],
 		"cmake.environment": {
-			"PATH": "D:\\LVGL\\mingw64\\bin;${env:PATH}"
+			"PATH": "D:\\UI\\LVGL\\mingw64\\bin;${env:PATH}"
 		},
 		"cmake.configureArgs": [
-			"-DCMAKE_C_COMPILER:FILEPATH=D:/LVGL/mingw64/bin/gcc.exe",
-			"-DCMAKE_CXX_COMPILER:FILEPATH=D:/LVGL/mingw64/bin/g++.exe"
+			"-DCMAKE_C_COMPILER:FILEPATH=D:/UI/LVGL/mingw64/bin/gcc.exe",
+			"-DCMAKE_CXX_COMPILER:FILEPATH=D:/UI/LVGL/mingw64/bin/g++.exe"
 		],
 		"files.trimTrailingWhitespace": true,
 		"files.insertFinalNewline": true,

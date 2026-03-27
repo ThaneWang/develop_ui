@@ -1,4 +1,15 @@
 cmake_minimum_required(VERSION 3.12.4)
+
+# Ninja：与 simulator.code-workspace 中 MinGW 路径一致；用 FORCE 覆盖 build 里错误的旧缓存路径。
+# 若两处都不存在 ninja.exe，请安装 Ninja 或改用生成器 MinGW Makefiles，并删除 build/ 后重配。
+if(WIN32)
+    if(EXISTS "D:/UI/LVGL/mingw64/bin/ninja.exe")
+        set(CMAKE_MAKE_PROGRAM "D:/UI/LVGL/mingw64/bin/ninja.exe" CACHE FILEPATH "Ninja" FORCE)
+    elseif(EXISTS "D:/LVGL/mingw64/bin/ninja.exe")
+        set(CMAKE_MAKE_PROGRAM "D:/LVGL/mingw64/bin/ninja.exe" CACHE FILEPATH "Ninja" FORCE)
+    endif()
+endif()
+
 project(lvgl C CXX)
 
 # Set the correct FreeRTOS port for your system (e.g., Posix for WSL)
@@ -100,7 +111,7 @@ if(NOT MSVC)
     list(APPEND MAIN_LIBS m pthread)
 endif()
 
-set(CMAKE_CMAKE_PATH "D:\\LVGL\\cmake-4.1.2-windows-x86_64\\bin\\cmake.exe")
+set(CMAKE_CMAKE_PATH "D:\\UI\\LVGL\\cmake-4.1.2-windows-x86_64\\bin\\cmake.exe")
 # Custom target to run the executable
 add_custom_target(run COMMAND ${EXECUTABLE_OUTPUT_PATH}/main DEPENDS main)
 

@@ -2,10 +2,10 @@ CompileFlags:
   CompilationDatabase: build
   Add:
     - -isystem
-    - D:\LVGL\mingw64\include
+    - D:\UI\LVGL\mingw64\include
     - -isystem
-    - D:\LVGL\mingw64\x86_64-w64-mingw32\include
+    - D:\UI\LVGL\mingw64\x86_64-w64-mingw32\include
     - -isystem
-    - D:\LVGL\mingw64\lib\gcc\x86_64-w64-mingw32\15.2.0\include
+    - D:\UI\LVGL\mingw64\lib\gcc\x86_64-w64-mingw32\15.2.0\include
     - -isystem
-    - D:\LVGL\mingw64\lib\gcc\x86_64-w64-mingw32\15.2.0\include-fixed
+    - D:\UI\LVGL\mingw64\lib\gcc\x86_64-w64-mingw32\15.2.0\include-fixed
