@@ -1,20 +1,12 @@
 /**
  * @file ui_display.c
- * @brief `lv_display_set_rotation` 封装；旋转后 LVGL 会交换逻辑分辨率并 `LV_EVENT_SIZE_CHANGED` 根屏。
+ * @brief 屏幕旋转：经 `ui_hw_display_rotation_set` 统一走外设占位；后续在 `ui_hw_hal.c` 接 LVGL/BSP。
  */
-#include "ui_common.h"
 #include "ui_display.h"
 
-/** 对默认 display 调用 `lv_display_set_rotation`；未开启 `UI_FEATURE_DISPLAY_ROTATION` 时为 no-op。 */
-void ui_display_apply_rotation(lv_display_rotation_t rotation)
+#include "ui_hw_hal.h"
+
+void ui_display_set_screen_rotation(ui_screen_rotation_t rot)
 {
-#if UI_FEATURE_DISPLAY_ROTATION
-    lv_display_t *d = lv_display_get_default();
-    if(d == NULL) {
-        return;
-    }
-    lv_display_set_rotation(d, rotation);
-#else
-    (void)rotation;
-#endif
+    ui_hw_display_rotation_set(true, rot);
 }

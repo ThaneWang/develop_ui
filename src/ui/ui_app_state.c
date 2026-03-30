@@ -1,12 +1,86 @@
 /**
  * @file ui_app_state.c
- * @brief 应用全局状态默认值与访问器（模拟器占位）。
+ * @brief 应用全局状态默认值与访问器（模拟器占位）；拍摄模式可写入 **`UI_APP_SHOOT_MODE_PERSIST_FILE`**。
  */
 #include "ui_app_state.h"
 
+#include <stddef.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "ui_hw_hal.h"
 #include "lvgl/lvgl.h"
 
+#ifndef UI_APP_SHOOT_MODE_OBSERVER_MAX
+#define UI_APP_SHOOT_MODE_OBSERVER_MAX 8
+#endif
+
 static ui_shoot_mode_t s_shoot_mode = UI_SHOOT_MODE_3DGS;
+
+static ui_app_shoot_mode_observer_fn s_mode_obs_fn[UI_APP_SHOOT_MODE_OBSERVER_MAX];
+static void *s_mode_obs_ud[UI_APP_SHOOT_MODE_OBSERVER_MAX];
+
+/** 依次调用已登记观察者。 */
+static void ui_app_shoot_mode_emit_observers(void)
+{
+    for(unsigned i = 0; i < UI_APP_SHOOT_MODE_OBSERVER_MAX; i++) {
+        if(s_mode_obs_fn[i] != NULL) {
+            s_mode_obs_fn[i](s_mode_obs_ud[i]);
+        }
+    }
+}
+
+bool ui_app_shoot_mode_observer_register(ui_app_shoot_mode_observer_fn fn, void *user_data)
+{
+    if(fn == NULL) {
+        return false;
+    }
+    for(unsigned i = 0; i < UI_APP_SHOOT_MODE_OBSERVER_MAX; i++) {
+        if(s_mode_obs_fn[i] == fn && s_mode_obs_ud[i] == user_data) {
+            return true;
+        }
+    }
+    for(unsigned j = 0; j < UI_APP_SHOOT_MODE_OBSERVER_MAX; j++) {
+        if(s_mode_obs_fn[j] == NULL) {
+            s_mode_obs_fn[j] = fn;
+            s_mode_obs_ud[j] = user_data;
+            return true;
+        }
+    }
+    return false;
+}
+
+void ui_app_shoot_mode_observer_unregister(ui_app_shoot_mode_observer_fn fn, void *user_data)
+{
+    if(fn == NULL) {
+        return;
+    }
+    for(unsigned i = 0; i < UI_APP_SHOOT_MODE_OBSERVER_MAX; i++) {
+        if(s_mode_obs_fn[i] == fn && s_mode_obs_ud[i] == user_data) {
+            s_mode_obs_fn[i] = NULL;
+            s_mode_obs_ud[i] = NULL;
+            return;
+        }
+    }
+}
+
+void ui_app_shoot_mode_observer_unregister_all(void)
+{
+    memset(s_mode_obs_fn, 0, sizeof(s_mode_obs_fn));
+    memset(s_mode_obs_ud, 0, sizeof(s_mode_obs_ud));
+}
+
+/** 将当前 `s_shoot_mode` 写入持久化文件（失败则静默）。 */
+static void ui_app_persist_shoot_mode_save(void)
+{
+    FILE *fp = fopen(UI_APP_SHOOT_MODE_PERSIST_FILE, "wb");
+    if(fp == NULL) {
+        return;
+    }
+    const unsigned char v = (unsigned char)s_shoot_mode;
+    (void)fwrite(&v, 1, 1, fp);
+    fclose(fp);
+}
 static uint32_t s_storage_free_gb = 32u;
 static uint8_t s_battery_pct = 100u;
 
@@ -46,6 +120,8 @@ void ui_app_shoot_mode_ensure_enabled(void)
 {
     if(s_shoot_mode >= UI_SHOOT_MODE_COUNT || !ui_shoot_mode_option_enabled(s_shoot_mode)) {
         s_shoot_mode = ui_shoot_mode_first_enabled();
+        ui_app_persist_shoot_mode_save();
+        ui_app_shoot_mode_emit_observers();
     }
 }
 
@@ -57,6 +133,23 @@ void ui_app_state_init(void)
     s_battery_pct = 100u;
 }
 
+void ui_app_state_boot_load(void)
+{
+    FILE *fp = fopen(UI_APP_SHOOT_MODE_PERSIST_FILE, "rb");
+    if(fp == NULL) {
+        s_shoot_mode = ui_shoot_mode_first_enabled();
+        return;
+    }
+    unsigned char v = 0xFFu;
+    const size_t n = fread(&v, 1, 1, fp);
+    fclose(fp);
+    if(n != 1u || v >= (unsigned char)UI_SHOOT_MODE_COUNT || !ui_shoot_mode_option_enabled((ui_shoot_mode_t)v)) {
+        s_shoot_mode = ui_shoot_mode_first_enabled();
+        return;
+    }
+    s_shoot_mode = (ui_shoot_mode_t)v;
+}
+
 /** 设置当前拍摄模式；非法或未开放则忽略。 */
 void ui_app_set_shoot_mode(ui_shoot_mode_t m)
 {
@@ -64,6 +157,9 @@ void ui_app_set_shoot_mode(ui_shoot_mode_t m)
         return;
     }
     s_shoot_mode = m;
+    ui_app_persist_shoot_mode_save();
+    ui_hw_shoot_mode_apply(m);
+    ui_app_shoot_mode_emit_observers();
 }
 
 /** 返回当前拍摄模式。 */

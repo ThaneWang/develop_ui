@@ -2,6 +2,10 @@
 build/
 bin/
 
+# 模拟器拍摄模式持久化（工作目录下生成）
+ui_shoot_mode.dat
+ui_sim_settings.bin
+
 # Ignore all dot folders, with below exceptions
 .*/
 

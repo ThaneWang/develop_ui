@@ -104,9 +104,15 @@ endif()
         src/ui/ui_indev.c
         src/ui/ui_nav.c
         src/ui/ui_display.c
+        src/ui/ui_hw_hal.c
+        src/ui/ui_mode_carousel.c
         src/ui/ui_page_main.c
         src/ui/ui_page_replay.c
         src/ui/ui_page_bt_settings.c
+        src/ui/ui_bt_nav.c
+        src/ui/ui_cc_settings_state.c
+        src/ui/ui_boot_debug_log.c
+        src/ui/ui_sim_settings_persist.c
         src/ui/ui_bt_state.c
     )
     list(APPEND MAIN_SOURCES src/logging.c)
@@ -167,6 +173,9 @@ endif()
 
 add_executable(main ${MAIN_SOURCES})
 target_compile_definitions(main PRIVATE LV_CONF_INCLUDE_SIMPLE)
+# 系统设置列表项开关见 `src/ui/ui_settings_config.h`（`UI_SETTINGS_SHOW_*`，1 显示 / 0 隐藏）。示例：关闭「蓝牙」行
+# target_compile_definitions(main PRIVATE UI_SETTINGS_SHOW_BT=0)
+# 产品 P0 仅三项拍摄模式：target_compile_definitions(main PRIVATE UI_DEBUG_ALL_SHOOT_MODES=0)
 target_link_libraries(main ${MAIN_LIBS})
 
 # On Windows, GUI applications do not show a console by default,

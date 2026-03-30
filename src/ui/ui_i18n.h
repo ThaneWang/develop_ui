@@ -31,6 +31,15 @@ typedef enum {
     UI_STR_BOTTOM_VIEW_CTRL,
     UI_STR_REPLAY_TITLE,
     UI_STR_REPLAY_BODY,
+    /** 回放顶栏：相册 / 最近拍摄 / 暂停 */
+    UI_STR_REPLAY_ALBUM_PAUSED,
+    /** 回放顶栏：相册 / 最近拍摄 / 播放中 */
+    UI_STR_REPLAY_ALBUM_PLAYING,
+    UI_STR_REPLAY_DURATION,
+    UI_STR_REPLAY_DELETE,
+    UI_STR_REPLAY_UPLOAD,
+    UI_STR_REPLAY_PLAY,
+    UI_STR_REPLAY_PROGRESS,
     UI_STR_CC_TITLE,
     UI_STR_CC_LANG_LABEL,
     UI_STR_CC_TILE_ROTATION,
@@ -97,8 +106,10 @@ void ui_i18n_reset_bindings(void);
 void ui_i18n_bind_label(lv_obj_t *label, ui_str_id_t id);
 /** 当前语言下静态字符串。 */
 const char *ui_i18n_str(ui_str_id_t id);
-/** 设置当前语言。 */
+/** 设置当前语言并写 `ui_sim_settings`（用户操作）。 */
 void ui_i18n_set_lang(ui_lang_t lang);
+/** 仅启动从文件恢复：改内存语种，不写盘（避免 `boot_load` 递归写文件）。 */
+void ui_i18n_set_lang_without_persist(ui_lang_t lang);
 /** 查询当前语言。 */
 ui_lang_t ui_i18n_get_lang(void);
 /** 刷新全部已绑定 Label 并重算根屏布局。 */

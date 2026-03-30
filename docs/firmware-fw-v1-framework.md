@@ -4,6 +4,32 @@
 > **文档状态**：FW-V1 框架内容已导入完成；正文不再逐条标注版本号。  
 > **UI 搭建**：LVGL 模拟器界面与信息架构以本文 **章节结构** 为产品依据；页面与控件对照见 **`docs/ui-fw-v1-mapping.md`**。
 
+## 目录
+
+- 1. 产品概述
+- 2. 相机功能
+- 3. 回放与文件管理
+- 4. 设备预览、交互与 UI
+- 5. 连接与传输
+- 6. 系统管理
+- 7. 配件协同
+- 8. 机内算法 / AI
+- 9. 声音
+- 10. 菜单默认值
+- 11. 附录
+
+## 文档导航（与本仓库其它 Markdown）
+
+| 文档 | 用途 |
+|------|------|
+| **`docs/README.md`** | 全部 **`docs/`** 文档的阅读顺序与主题归类 |
+| **`docs/ui-fw-v1-mapping.md`** | 本文各章与 **`src/ui`** 页面对照（不重复正文） |
+| **`docs/ui-simulator-status.md`** | 模拟器已实现界面与工程路径（持续维护） |
+| **`docs/project-plan.md`** | 阶段路线图（资料 → LVGL → RTOS/平台） |
+| **`docs/dev-plan.md`** | 可执行 backlog 与已完成归档 |
+| **`docs/ui-camera-preview-and-overlay.md`** | 目标机预览 Overlay 与 LVGL 分层架构 |
+| **`.cursor/rules/rules.md`** | 编码、手势、主题与 HAL 等工程约定 |
+
 ---
 
 ## 1. 产品概述

@@ -17,4 +17,14 @@ void ui_label_i18n_wrap(lv_obj_t *label, lv_coord_t wrap_width);
 /** 固定条带内文字可能超高时：纵向滚动 + 自动隐藏滚动条（溢出时出现） */
 void ui_region_strip_enable_scroll(lv_obj_t *strip);
 
+/**
+ * 控制中心「系统设置」列表行：灰底半透明 + 细边框 + 圆角 + 内边距（高 48px）。
+ * 调用方需自行设宽、`LV_LAYOUT_FLEX` 及子控件。
+ */
+void ui_style_cc_settings_row_apply(lv_obj_t *row);
+/**
+ * 可点击控件悬停/聚焦描边与略缩放 + 过渡（与控制中心返回键、设置项行一致）。
+ */
+void ui_style_cc_interactive_focus(lv_obj_t *ctrl);
+
 #endif

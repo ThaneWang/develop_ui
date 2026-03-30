@@ -1,6 +1,8 @@
 /**
  * @file ui_page_main.c
  * @brief 相机主界面：状态栏、预览区、底栏；预览区手势(右滑回放/左滑 ISP/下拉全屏控制中心/上滑模式页)；控制中心 8 宫格与系统设置子页。
+ * 拍摄模式单一数据源为 `ui_app`：`ui_app_set_shoot_mode` 在横条 `SCROLL_END` **立即**写全局状态（观察者刷新顶栏/底栏/快切）；横条卡片选中边框/底色用 **`UI_MODE_CARD_SELECT_TRANSITION_MS`** 过渡，与甩动惯性（`UI_INDEV_SCROLL_THROW_PCT`）分工。
+ * 全屏手势跟手：**无** 面板淡入淡出；**右滑进回放无右缘半透明条**（与上/下滑一致，仅松手阈值判定）；模式层与控制中心一致：**遮罩** + 内容 **`lv_obj_set_y`**（不用 **`translate_y`**），主界面底栏/顶栏/预览区 **不** 随手势位移。
  * 可翻译文案经 `ui_i18n_bind_label()` 绑定；符号与 Montserrat 专用字体仍用 static 文本。
  * 主屏区划文案无底色、换行与滚动见 `ui_label_i18n_wrap` / `ui_region_strip_enable_scroll` 及 `.cursor/rules.md`「1.1」。
  * @note 滑动手势与阈值约定见 **`.cursor/rules/ui_swipe_gestures.md`**；固件能力章节与 UI 对照见 **`docs/firmware-fw-v1-framework.md`**（版本见文首）、**`docs/ui-fw-v1-mapping.md`**。
@@ -8,47 +10,55 @@
 #include "ui_page_main.h"
 #include "ui_app_state.h"
 #include "ui_common.h"
-#include "ui_display.h"
+#include "ui_settings_config.h"
 #include "ui_events.h"
 #include "ui_i18n.h"
 #include "ui_nav.h"
+#include "ui_bt_nav.h"
 #include "ui_bt_state.h"
+#include "ui_boot_debug_log.h"
+#include "ui_cc_settings_state.h"
 #include "ui_style.h"
 #include "ui_font.h"
 #include "ui_indev.h"
+#include "ui_hw_hal.h"
+#include "ui_mode_carousel.h"
 #include "../logging.h"
 #include "lvgl/lvgl.h"
 #include "lvgl/src/layouts/grid/lv_grid.h"
 
-/** 模式横条物理槽上限：开放项 + 首尾各 1 重复页（与 `lv_roller` 无限滚轮同类循环）。 */
-#define UI_MODE_STRIP_PHYS_MAX (UI_SHOOT_MODE_COUNT + 2)
-
-#if UI_FEATURE_DISPLAY_ROTATION
-static void cc_show_rotation_view(void);
-#endif
+/** 模式卡片选中态（边框/底色）过渡 */
+static lv_style_transition_dsc_t s_mode_card_tr;
+static bool s_mode_card_tr_inited;
 
 static void cc_sync_settings_list_geom(void);
 static void cc_settings_list_scroll_end_cb(lv_event_t *e);
+static void cc_show_rotation_view(void);
 
 static void main_refresh_status_bar(void);
-static void main_mode_strip_scroll_to_current(void);
+static void main_refresh_bottom_mode_cell(void);
+static void main_refresh_cc_quick_tile_label(void);
+static void main_shoot_mode_observer_cb(void *user_data);
+static void main_mode_strip_scroll_to_current(bool scroll_anim);
+static void main_show_control_center(bool show);
+static void main_show_mode_panel(bool show);
 static void main_mode_update_card_selection(void);
+static void mode_carousel_on_visual_scroll(void *user_data);
+static void mode_carousel_on_mode_committed(ui_shoot_mode_t m, void *user_data);
 
 static lv_obj_t *s_isp;
 static lv_obj_t *s_cc_dim;
 static lv_obj_t *s_cc_sheet;
+/** 模式全屏层遮罩（与控制中心 `s_cc_dim` 一致：主界面不位移，仅叠层） */
+static lv_obj_t *s_mode_dim;
 static lv_obj_t *s_mode;
-/** 模式页横向滚动容器 */
+/** 模式页横向条：`ui_mode_carousel`（多段缓冲循环，见 `docs/ui-mode-strip-carousel-options.md`） */
 static lv_obj_t *s_mode_strip;
-/** 每项一页：宽等于视口，卡片在页内居中；滚动/吸附以 page 为子项，保证选中项几何居中 */
-static lv_obj_t *s_mode_pages[UI_MODE_STRIP_PHYS_MAX];
-static lv_obj_t *s_mode_cards[UI_MODE_STRIP_PHYS_MAX];
-/** 横条上物理子页数（含循环用的首尾重复页；`s_mode_strip_real_n >= 2` 时为 `real_n + 2`） */
-static uint32_t s_mode_strip_slot_n;
-/** 已开放模式个数（不含重复页）；用于循环边界与 `scroll_to_current` 落在中间段 */
-static uint32_t s_mode_strip_real_n;
-/** `s_mode_pages[s]` / `s_mode_cards[s]` 对应的 `ui_shoot_mode_t` */
-static ui_shoot_mode_t s_mode_strip_mode_at[UI_MODE_STRIP_PHYS_MAX];
+/** 底栏左格：当前拍摄模式符号 + 名称（与 `ui_app_get_shoot_mode()` 同步） */
+static lv_obj_t *s_bottom_mode_icon_l;
+static lv_obj_t *s_bottom_mode_name_l;
+/** 顶栏根容器（用于文案变更后 `update_layout`） */
+static lv_obj_t *s_status_bar;
 /** 顶栏：存储文案、模式符号、电量、蓝牙字条 */
 static lv_obj_t *s_status_storage_l;
 static lv_obj_t *s_status_mode_ic;
@@ -56,24 +66,20 @@ static lv_obj_t *s_status_bat_l;
 static lv_obj_t *s_chrome_bt_l;
 static lv_obj_t *s_cc_lang_dd;
 static lv_obj_t *s_cc_grid;
+/** 控制中心宫格索引 6：文案为「快切 + 当前模式名」，不走 `ui_i18n_bind_label`。 */
+static lv_obj_t *s_cc_quick_tile_l;
 static lv_obj_t *s_cc_settings;
 /** 系统设置页可滚动列表（用于高度同步、滚动预览、与上滑关闭手势区分） */
 static lv_obj_t *s_cc_set_list;
 /** 控制中心 `PRESSED` 时记录列表 `scroll_y`，用于判断本次手势是否为列表滚动 */
 static int32_t s_cc_setlist_scroll_y_at_press;
-#if UI_FEATURE_DISPLAY_ROTATION
 static lv_obj_t *s_cc_rotation_panel;
 static lv_obj_t *s_cc_rot_switch;
 static lv_obj_t *s_cc_rot_angle_list;
 static lv_obj_t *s_cc_rot_angle_btns[4];
-static bool s_cc_rot_enabled;
-static uint8_t s_cc_rot_sel_idx;
-#endif
 static bool s_isp_open;
 static bool s_cc_open;
 static bool s_mode_open;
-/** 程序化 `scroll_to_view` / `update_snap` 时抑制横条 `SCROLL_END`，避免重复写回与重入 */
-static uint8_t s_mode_strip_scroll_end_suppress;
 static int32_t s_cc_sheet_h;
 
 /** 主预览区手势：按下起点 */
@@ -97,61 +103,8 @@ static bool s_vp_cc_drag;
 static bool s_vp_mode_preview;
 /** 左滑 ISP 跟手预览（仅从未展开状态拖出） */
 static bool s_vp_isp_preview;
-/** 右滑回放预显条（无点击，不挡触摸） */
-static lv_obj_t *s_vp_replay_peek;
 /** 全屏宽、仅中间带高的透明层：眼睛与手势提示相对「主内容区」几何中心固定，不随 ISP 列宽变化 */
 static lv_obj_t *s_vp_decor_layer;
-
-static const lv_style_prop_t s_cc_lang_hit_tr_props[] = {
-    LV_STYLE_TRANSFORM_SCALE_X,
-    LV_STYLE_TRANSFORM_SCALE_Y,
-    LV_STYLE_OUTLINE_WIDTH,
-    LV_STYLE_OUTLINE_OPA,
-    LV_STYLE_PROP_INV,
-};
-
-static lv_style_transition_dsc_t s_cc_lang_hit_tr;
-static bool s_cc_lang_hit_tr_inited;
-
-/** 为语种下拉等控件安装描边/缩放过渡描述符（懒初始化一次）。 */
-static void cc_lang_ctrl_install_transition(lv_obj_t *ctrl)
-{
-    if(!s_cc_lang_hit_tr_inited) {
-        lv_style_transition_dsc_init(&s_cc_lang_hit_tr, s_cc_lang_hit_tr_props, lv_anim_path_ease_out, 120, 0, NULL);
-        s_cc_lang_hit_tr_inited = true;
-    }
-    lv_obj_set_style_transition(ctrl, &s_cc_lang_hit_tr, LV_PART_MAIN);
-}
-
-/** 悬停/聚焦/展开：略放大 + 描边（用于控制中心语种下拉） */
-static void cc_lang_ctrl_apply_focus_visual(lv_obj_t *ctrl)
-{
-    lv_obj_set_style_transform_pivot_x(ctrl, lv_pct(50), LV_PART_MAIN);
-    lv_obj_set_style_transform_pivot_y(ctrl, lv_pct(50), LV_PART_MAIN);
-    lv_obj_set_style_transform_scale_x(ctrl, LV_SCALE_NONE, LV_PART_MAIN);
-    lv_obj_set_style_transform_scale_y(ctrl, LV_SCALE_NONE, LV_PART_MAIN);
-    lv_obj_set_style_transform_scale_x(ctrl, 280, LV_PART_MAIN | LV_STATE_HOVERED);
-    lv_obj_set_style_transform_scale_y(ctrl, 280, LV_PART_MAIN | LV_STATE_HOVERED);
-    lv_obj_set_style_transform_scale_x(ctrl, 280, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_transform_scale_y(ctrl, 280, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_transform_scale_x(ctrl, 280, LV_PART_MAIN | LV_STATE_CHECKED);
-    lv_obj_set_style_transform_scale_y(ctrl, 280, LV_PART_MAIN | LV_STATE_CHECKED);
-    lv_obj_set_style_outline_width(ctrl, 0, LV_PART_MAIN);
-    lv_obj_set_style_outline_opa(ctrl, LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_set_style_outline_width(ctrl, 2, LV_PART_MAIN | LV_STATE_HOVERED);
-    lv_obj_set_style_outline_opa(ctrl, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_HOVERED);
-    lv_obj_set_style_outline_color(ctrl, lv_palette_main(LV_PALETTE_BLUE), LV_PART_MAIN | LV_STATE_HOVERED);
-    lv_obj_set_style_outline_pad(ctrl, 2, LV_PART_MAIN | LV_STATE_HOVERED);
-    lv_obj_set_style_outline_width(ctrl, 2, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_outline_opa(ctrl, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_outline_color(ctrl, lv_palette_main(LV_PALETTE_BLUE), LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_outline_pad(ctrl, 2, LV_PART_MAIN | LV_STATE_FOCUSED);
-    lv_obj_set_style_outline_width(ctrl, 2, LV_PART_MAIN | LV_STATE_CHECKED);
-    lv_obj_set_style_outline_opa(ctrl, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_CHECKED);
-    lv_obj_set_style_outline_color(ctrl, lv_palette_main(LV_PALETTE_BLUE), LV_PART_MAIN | LV_STATE_CHECKED);
-    lv_obj_set_style_outline_pad(ctrl, 2, LV_PART_MAIN | LV_STATE_CHECKED);
-    cc_lang_ctrl_install_transition(ctrl);
-}
 
 /** 按电量百分比返回 LVGL 电池符号字符串。 */
 static const char *main_battery_glyph(uint8_t pct)
@@ -193,27 +146,43 @@ static void main_refresh_status_bar(void)
             lv_obj_add_flag(s_chrome_bt_l, LV_OBJ_FLAG_HIDDEN);
         }
     }
+    if(s_status_bar != NULL && lv_obj_is_valid(s_status_bar)) {
+        lv_obj_update_layout(s_status_bar);
+    }
+    main_refresh_bottom_mode_cell();
+    main_refresh_cc_quick_tile_label();
 }
 
-/** 按 `ui_app_get_shoot_mode()` 更新模式卡片边框与底色。 */
-static void main_mode_update_card_selection(void)
+/** `ui_app_shoot_mode_observer_register`：模式变更时刷新顶栏/底栏/快切磁贴。 */
+static void main_shoot_mode_observer_cb(void *user_data)
 {
-    const ui_shoot_mode_t cur = ui_app_get_shoot_mode();
-    for(uint32_t s = 0; s < s_mode_strip_slot_n; s++) {
-        lv_obj_t *c = s_mode_cards[s];
-        if(c == NULL || !lv_obj_is_valid(c)) {
-            continue;
-        }
-        if(s_mode_strip_mode_at[s] == cur) {
-            lv_obj_set_style_border_width(c, 3, 0);
-            lv_obj_set_style_border_color(c, lv_palette_main(LV_PALETTE_BLUE), 0);
-            lv_obj_set_style_bg_color(c, lv_color_hex(0xE8F4FF), 0);
-        }
-        else {
-            lv_obj_set_style_border_width(c, 0, 0);
-            lv_obj_set_style_border_color(c, lv_color_hex(0xDDDDDD), 0);
-            lv_obj_set_style_bg_color(c, lv_color_hex(0xF7F7F7), 0);
-        }
+    LV_UNUSED(user_data);
+    main_refresh_status_bar();
+}
+
+/** 控制中心「快切」磁贴：与底栏左格共用 `ui_app_get_shoot_mode()` 文案。 */
+static void main_refresh_cc_quick_tile_label(void)
+{
+    if(s_cc_quick_tile_l == NULL || !lv_obj_is_valid(s_cc_quick_tile_l)) {
+        return;
+    }
+    ui_app_shoot_mode_ensure_enabled();
+    lv_label_set_text_fmt(s_cc_quick_tile_l, "%s\n%s", ui_i18n_str(UI_STR_CC_TILE_QUICK),
+                          ui_i18n_str(ui_i18n_shoot_mode_label_id(ui_app_get_shoot_mode())));
+    ui_style_zone_label(s_cc_quick_tile_l);
+}
+
+/** 刷新底栏左格：仅显示当前拍摄模式（符号 + i18n 名称）。 */
+static void main_refresh_bottom_mode_cell(void)
+{
+    ui_app_shoot_mode_ensure_enabled();
+    const ui_shoot_mode_t m = ui_app_get_shoot_mode();
+    if(s_bottom_mode_icon_l != NULL && lv_obj_is_valid(s_bottom_mode_icon_l)) {
+        lv_label_set_text_static(s_bottom_mode_icon_l, ui_app_shoot_mode_icon_glyph(m));
+    }
+    if(s_bottom_mode_name_l != NULL && lv_obj_is_valid(s_bottom_mode_name_l)) {
+        lv_label_set_text(s_bottom_mode_name_l, ui_i18n_str(ui_i18n_shoot_mode_label_id(m)));
+        ui_style_zone_label(s_bottom_mode_name_l);
     }
 }
 
@@ -223,134 +192,48 @@ static void main_mode_shoot_mode_clamp_default(void)
     ui_app_shoot_mode_ensure_enabled();
 }
 
-/** 取横向滚动条视口中心下最接近的模式子项索引。 */
-static uint32_t main_mode_strip_nearest_index(lv_obj_t *strip)
+/** `ui_mode_carousel` 跟手：按视口中心刷新卡片高亮（不写回 `ui_app`）。 */
+static void mode_carousel_on_visual_scroll(void *user_data)
 {
-    if(strip == NULL || !lv_obj_is_valid(strip)) {
-        return 0u;
-    }
-    const int32_t sx = lv_obj_get_scroll_x(strip);
-    const lv_coord_t vw = lv_obj_get_width(strip);
-    const int32_t center = sx + vw / 2;
-    uint32_t best = 0u;
-    lv_coord_t best_d = LV_COORD_MAX;
-    const uint32_t n = lv_obj_get_child_count(strip);
-    for(uint32_t i = 0; i < n; i++) {
-        lv_obj_t *c = lv_obj_get_child(strip, (int32_t)i);
-        if(c == NULL) {
-            continue;
-        }
-        const int32_t cx = lv_obj_get_x(c) + lv_obj_get_width(c) / 2;
-        const lv_coord_t d = LV_ABS(cx - center);
-        if(d < best_d) {
-            best_d = d;
-            best = i;
-        }
-    }
-    return best;
+    LV_UNUSED(user_data);
+    main_mode_update_card_selection();
 }
 
-/**
- * 将横条滚动并使 **当前全局模式** 对应 **页** 居中进视口（页宽小于屏宽以露出相邻模式），无动画。
- * 打开模式页时调用：从 `ui_app_get_shoot_mode()` 恢复上次选择；非法枚举先钳位到第一项。
- * 多项开放时落在 **中间段**（物理索引 `1…real_n`），避免停在首尾重复页。
- */
-static void main_mode_strip_scroll_to_current(void)
+/** `ui_mode_carousel` 停稳：**立即** `ui_app_set_shoot_mode`（持久化 + 观察者刷新顶栏/底栏）；随后 `on_visual_scroll` 更新卡片高亮，选中态样式见 `UI_MODE_CARD_SELECT_TRANSITION_MS`。 */
+static void mode_carousel_on_mode_committed(ui_shoot_mode_t m, void *user_data)
+{
+    LV_UNUSED(user_data);
+    ui_app_set_shoot_mode(m);
+}
+
+/** 按横条 **当前滚动位置**（视口中心最近子页）更新卡片高亮。 */
+static void main_mode_update_card_selection(void)
 {
     if(s_mode_strip == NULL || !lv_obj_is_valid(s_mode_strip)) {
         return;
     }
-    if(s_mode_strip_slot_n == 0u) {
+    lv_obj_update_layout(s_mode_strip);
+    ui_mode_carousel_highlight_slot(s_mode_strip, ui_mode_carousel_nearest_index(s_mode_strip));
+}
+
+/**
+ * 将横条滚动并使 **当前全局模式** 对应 **页** 居中进视口。
+ * @param scroll_anim `true`：`scroll_to_view` 带动画；`false`：立即定位（打开模式页淡入结束、上滑提交等；进入模式页不播放横条滑入动画）。
+ */
+static void main_mode_strip_scroll_to_current(bool scroll_anim)
+{
+    if(s_mode_strip == NULL || !lv_obj_is_valid(s_mode_strip)) {
+        return;
+    }
+    if(ui_mode_carousel_phys_count(s_mode_strip) == 0u) {
         return;
     }
     main_mode_shoot_mode_clamp_default();
 
-    const ui_shoot_mode_t want = ui_app_get_shoot_mode();
-    uint32_t slot = UINT32_MAX;
-    if(s_mode_strip_real_n >= 2u) {
-        for(uint32_t p = 1u; p <= s_mode_strip_real_n; p++) {
-            if(s_mode_strip_mode_at[p] == want) {
-                slot = p;
-                break;
-            }
-        }
-    }
-    else {
-        for(uint32_t p = 0u; p < s_mode_strip_slot_n; p++) {
-            if(s_mode_strip_mode_at[p] == want) {
-                slot = p;
-                break;
-            }
-        }
-    }
-    if(slot == UINT32_MAX || s_mode_pages[slot] == NULL || !lv_obj_is_valid(s_mode_pages[slot])) {
-        return;
-    }
-
     if(s_mode != NULL && lv_obj_is_valid(s_mode)) {
         lv_obj_update_layout(s_mode);
     }
-    lv_obj_update_layout(s_mode_strip);
-
-    s_mode_strip_scroll_end_suppress++;
-    lv_obj_scroll_to_view(s_mode_pages[slot], LV_ANIM_OFF);
-    lv_obj_update_snap(s_mode_strip, LV_ANIM_OFF);
-    s_mode_strip_scroll_end_suppress--;
-
-    main_mode_update_card_selection();
-    main_refresh_status_bar();
-}
-
-/**
- * 用户横向滑动结束：先完成 **居中吸附**，再将 **视口中心的卡片** 写回全局模式并刷新选中态与顶栏。
- * 多项开放时首尾为重复页：`SCROLL_END` 落在重复位则 **无动画跳转到中间段** 对应真项（与 `lv_roller` 无限循环同类）。
- */
-static void mode_strip_scroll_end_cb(lv_event_t *e)
-{
-    if(lv_event_get_code(e) != LV_EVENT_SCROLL_END) {
-        return;
-    }
-    if(s_mode_strip_scroll_end_suppress > 0u) {
-        return;
-    }
-    lv_obj_t *strip = lv_event_get_target(e);
-    s_mode_strip_scroll_end_suppress++;
-    lv_obj_update_snap(strip, LV_ANIM_OFF);
-    s_mode_strip_scroll_end_suppress--;
-    lv_obj_update_layout(strip);
-
-    const uint32_t phys_n = s_mode_strip_slot_n;
-    const uint32_t real_n = s_mode_strip_real_n;
-    const uint32_t si = main_mode_strip_nearest_index(strip);
-    if(si >= phys_n) {
-        return;
-    }
-
-    if(real_n >= 2u) {
-        if(si == 0u && s_mode_pages[real_n] != NULL && lv_obj_is_valid(s_mode_pages[real_n])) {
-            s_mode_strip_scroll_end_suppress++;
-            lv_obj_scroll_to_view(s_mode_pages[real_n], LV_ANIM_OFF);
-            lv_obj_update_snap(strip, LV_ANIM_OFF);
-            s_mode_strip_scroll_end_suppress--;
-            ui_app_set_shoot_mode(s_mode_strip_mode_at[real_n]);
-            main_mode_update_card_selection();
-            main_refresh_status_bar();
-            return;
-        }
-        if(si == phys_n - 1u && s_mode_pages[1] != NULL && lv_obj_is_valid(s_mode_pages[1])) {
-            s_mode_strip_scroll_end_suppress++;
-            lv_obj_scroll_to_view(s_mode_pages[1], LV_ANIM_OFF);
-            lv_obj_update_snap(strip, LV_ANIM_OFF);
-            s_mode_strip_scroll_end_suppress--;
-            ui_app_set_shoot_mode(s_mode_strip_mode_at[1]);
-            main_mode_update_card_selection();
-            main_refresh_status_bar();
-            return;
-        }
-    }
-
-    ui_app_set_shoot_mode(s_mode_strip_mode_at[si]);
-    main_mode_update_card_selection();
+    ui_mode_carousel_scroll_to_mode(s_mode_strip, ui_app_get_shoot_mode(), scroll_anim ? LV_ANIM_ON : LV_ANIM_OFF);
     main_refresh_status_bar();
 }
 
@@ -402,11 +285,9 @@ static const int32_t s_cc_grid_row_dsc[] = {
 /** 控制中心：显示 8 宫格，隐藏系统设置子页 */
 static void cc_show_grid_view(void)
 {
-#if UI_FEATURE_DISPLAY_ROTATION
     if(s_cc_rotation_panel != NULL && lv_obj_is_valid(s_cc_rotation_panel)) {
         lv_obj_add_flag(s_cc_rotation_panel, LV_OBJ_FLAG_HIDDEN);
     }
-#endif
     if(s_cc_grid != NULL && lv_obj_is_valid(s_cc_grid)) {
         lv_obj_clear_flag(s_cc_grid, LV_OBJ_FLAG_HIDDEN);
     }
@@ -418,11 +299,9 @@ static void cc_show_grid_view(void)
 /** 控制中心：显示系统设置子页，隐藏宫格 */
 static void cc_show_settings_view(void)
 {
-#if UI_FEATURE_DISPLAY_ROTATION
     if(s_cc_rotation_panel != NULL && lv_obj_is_valid(s_cc_rotation_panel)) {
         lv_obj_add_flag(s_cc_rotation_panel, LV_OBJ_FLAG_HIDDEN);
     }
-#endif
     if(s_cc_grid != NULL && lv_obj_is_valid(s_cc_grid)) {
         lv_obj_add_flag(s_cc_grid, LV_OBJ_FLAG_HIDDEN);
     }
@@ -450,7 +329,7 @@ static void cc_settings_item_clicked_cb(lv_event_t *e)
     if(id == UI_STR_SETTINGS_BT) {
         printf("[Settings] navigate -> Bluetooth settings\n");
         LOG_DEBUG("Settings: open Bluetooth page");
-        lv_async_call(ui_nav_replace_with_bt_settings_async, NULL);
+        ui_bt_nav_open_async();
         return;
     }
     printf("[Settings] tap id=%d \"%s\"\n", (int)id, ui_i18n_str(id));
@@ -533,22 +412,39 @@ static void cc_tile_clicked_cb(lv_event_t *e)
         LOG_DEBUG("CC: system settings opened");
         return;
     }
-#if UI_FEATURE_DISPLAY_ROTATION
     if(idx == 0u) {
         cc_show_rotation_view();
-        printf("[CC] %s -> rotation panel\n", ui_i18n_str(s_cc_tile_str_ids[idx]));
-        LOG_DEBUG("CC: rotation panel opened");
+        printf("[CC] %s -> rotation detail\n", ui_i18n_str(s_cc_tile_str_ids[idx]));
+        LOG_DEBUG("CC: rotation detail opened");
         return;
     }
-#endif
+    if(idx == 4u) {
+        uint8_t b = ui_cc_settings_get_brightness();
+        b = (uint8_t)((b + 10u) > 100u ? 10u : (b + 10u));
+        ui_cc_settings_set_brightness(b);
+        printf("[CC] %s -> %u%%\n", ui_i18n_str(s_cc_tile_str_ids[idx]), (unsigned)b);
+        LOG_DEBUG("CC: brightness %u", (unsigned)b);
+        return;
+    }
+    if(idx == 5u) {
+        uint8_t v = ui_cc_settings_get_volume();
+        v = (uint8_t)((v + 10u) > 100u ? 10u : (v + 10u));
+        ui_cc_settings_set_volume(v);
+        printf("[CC] %s -> %u%%\n", ui_i18n_str(s_cc_tile_str_ids[idx]), (unsigned)v);
+        LOG_DEBUG("CC: volume %u", (unsigned)v);
+        return;
+    }
+    /** 快切（宫格第 7 项，0-based 索引 6）：进入模式切换页 */
+    if(idx == 6u) {
+        main_show_control_center(false);
+        main_show_mode_panel(true);
+        printf("[CC] quick switch -> mode panel (current %s)\n", ui_i18n_str(ui_i18n_shoot_mode_label_id(ui_app_get_shoot_mode())));
+        LOG_DEBUG("CC: quick switch -> mode panel");
+        return;
+    }
     printf("[CC] %s effect triggered\n", ui_i18n_str(s_cc_tile_str_ids[idx]));
     LOG_DEBUG("CC tile: %s triggered", ui_i18n_str(s_cc_tile_str_ids[idx]));
 }
-
-/** 前向声明，实现见下文。 */
-static void main_show_control_center(bool show);
-/** 前向声明，实现见下文。 */
-static void main_show_mode_panel(bool show);
 
 /** ISP 侧栏宽度动画执行回调 */
 static void isp_width_anim_cb(void *var, int32_t v)
@@ -633,19 +529,6 @@ static void cc_sheet_y_anim_cb(void *var, int32_t v)
     lv_obj_set_y(var, v);
 }
 
-/** 控制中心收起动画结束：隐藏遮罩与 sheet，清 `s_cc_open` */
-static void cc_hide_done_cb(lv_anim_t *a)
-{
-    LV_UNUSED(a);
-    if(s_cc_dim != NULL) {
-        lv_obj_add_flag(s_cc_dim, LV_OBJ_FLAG_HIDDEN);
-    }
-    if(s_cc_sheet != NULL) {
-        lv_obj_add_flag(s_cc_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
-    s_cc_open = false;
-}
-
 /** 点击半透明遮罩：关闭控制中心 */
 static void cc_dim_clicked_cb(lv_event_t *e)
 {
@@ -654,8 +537,8 @@ static void cc_dim_clicked_cb(lv_event_t *e)
 }
 
 /**
- * @brief 打开/关闭全屏控制中心（遮罩 + 自顶向下滑入的 sheet）。
- * @param show true 打开并复位到宫格视图；false 播放收起动画。
+ * @brief 打开/关闭全屏控制中心（遮罩 + sheet；无滑入/滑出动画，瞬时到位）。
+ * @param show true 打开并复位到宫格视图；false 收起并隐藏。
  */
 static void main_show_control_center(bool show)
 {
@@ -674,16 +557,8 @@ static void main_show_control_center(bool show)
         lv_obj_clear_flag(s_cc_sheet, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(s_cc_dim);
         lv_obj_move_foreground(s_cc_sheet);
-        lv_obj_set_y(s_cc_sheet, -s_cc_sheet_h);
-
-        lv_anim_t anim;
-        lv_anim_init(&anim);
-        lv_anim_set_var(&anim, s_cc_sheet);
-        lv_anim_set_values(&anim, -s_cc_sheet_h, 0);
-        lv_anim_set_exec_cb(&anim, cc_sheet_y_anim_cb);
-        lv_anim_set_duration(&anim, 240);
-        lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
-        lv_anim_start(&anim);
+        lv_obj_set_y(s_cc_sheet, 0);
+        lv_obj_set_style_bg_opa(s_cc_dim, LV_OPA_50, 0);
         cc_lang_dd_sync_from_i18n();
     }
     else {
@@ -694,15 +569,14 @@ static void main_show_control_center(bool show)
             lv_dropdown_close(s_cc_lang_dd);
         }
         cc_show_grid_view();
-        lv_anim_t anim;
-        lv_anim_init(&anim);
-        lv_anim_set_var(&anim, s_cc_sheet);
-        lv_anim_set_values(&anim, lv_obj_get_y(s_cc_sheet), -s_cc_sheet_h);
-        lv_anim_set_exec_cb(&anim, cc_sheet_y_anim_cb);
-        lv_anim_set_duration(&anim, 200);
-        lv_anim_set_path_cb(&anim, lv_anim_path_ease_in);
-        lv_anim_set_completed_cb(&anim, cc_hide_done_cb);
-        lv_anim_start(&anim);
+        lv_obj_set_y(s_cc_sheet, -s_cc_sheet_h);
+        if(s_cc_dim != NULL && lv_obj_is_valid(s_cc_dim)) {
+            lv_obj_add_flag(s_cc_dim, LV_OBJ_FLAG_HIDDEN);
+        }
+        if(s_cc_sheet != NULL && lv_obj_is_valid(s_cc_sheet)) {
+            lv_obj_add_flag(s_cc_sheet, LV_OBJ_FLAG_HIDDEN);
+        }
+        s_cc_open = false;
     }
 }
 
@@ -765,22 +639,6 @@ static void cc_sheet_swipe_dismiss_cb(lv_event_t *e)
     }
 }
 
-/** 模式页淡出结束：隐藏并恢复不透明 */
-static void mode_hide_done_cb(lv_anim_t *a)
-{
-    LV_UNUSED(a);
-    if(s_mode != NULL) {
-        lv_obj_set_style_opa(s_mode, LV_OPA_COVER, LV_PART_MAIN);
-        lv_obj_add_flag(s_mode, LV_OBJ_FLAG_HIDDEN);
-    }
-}
-
-/** 模式页透明度动画 */
-static void mode_opa_anim_cb(void *var, int32_t v)
-{
-    lv_obj_set_style_opa((lv_obj_t *)var, (lv_opa_t)v, LV_PART_MAIN);
-}
-
 /**
  * @brief 模式参数页：下滑关闭（与「上滑打开」相反）。
  *
@@ -827,57 +685,52 @@ static void mode_close_btn_cb(lv_event_t *e)
     main_show_mode_panel(false);
 }
 
-/** 模式页淡入动画结束：跳转到全局当前模式并 **居中**（`main_mode_strip_scroll_to_current` 内已刷新选中态与顶栏）。 */
-static void mode_show_done_cb(lv_anim_t *a)
+/** 点击模式层遮罩：关闭（与控制中心遮罩一致） */
+static void mode_dim_clicked_cb(lv_event_t *e)
 {
-    LV_UNUSED(a);
-    if(!s_mode_open || s_mode_strip == NULL || !lv_obj_is_valid(s_mode_strip)) {
-        return;
-    }
-    main_mode_strip_scroll_to_current();
+    LV_UNUSED(e);
+    main_show_mode_panel(false);
 }
 
-/** 显示/隐藏模式参数全屏层（淡入淡出） */
+/** 显示/隐藏模式参数全屏层（遮罩 + 白底层；瞬时；横条立即对齐当前模式） */
 static void main_show_mode_panel(bool show)
 {
     if(s_mode == NULL) {
         return;
     }
-    lv_anim_delete(s_mode, mode_opa_anim_cb);
 
     if(show) {
         if(s_mode_open) {
             return;
         }
         s_mode_open = true;
+        if(s_mode_dim != NULL && lv_obj_is_valid(s_mode_dim)) {
+            lv_obj_clear_flag(s_mode_dim, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_style_bg_opa(s_mode_dim, LV_OPA_50, 0);
+            lv_obj_move_foreground(s_mode_dim);
+        }
         lv_obj_clear_flag(s_mode, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_style_opa(s_mode, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_opa(s_mode, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_translate_y(s_mode, 0, LV_PART_MAIN);
+        lv_obj_set_y(s_mode, 0);
         lv_obj_move_foreground(s_mode);
-
-        lv_anim_t anim;
-        lv_anim_init(&anim);
-        lv_anim_set_var(&anim, s_mode);
-        lv_anim_set_values(&anim, LV_OPA_TRANSP, LV_OPA_COVER);
-        lv_anim_set_exec_cb(&anim, mode_opa_anim_cb);
-        lv_anim_set_duration(&anim, 200);
-        lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
-        lv_anim_set_completed_cb(&anim, mode_show_done_cb);
-        lv_anim_start(&anim);
+        lv_obj_update_layout(s_mode);
+        main_mode_strip_scroll_to_current(false);
     }
     else {
-        if(!s_mode_open) {
+        /* 含上滑未提交预览（`s_vp_mode_preview`）：点遮罩关闭须收起层，不能仅 `s_mode_open` 判断 */
+        if(!s_mode_open && !s_vp_mode_preview) {
             return;
         }
         s_mode_open = false;
-        lv_anim_t anim;
-        lv_anim_init(&anim);
-        lv_anim_set_var(&anim, s_mode);
-        lv_anim_set_values(&anim, lv_obj_get_style_opa(s_mode, LV_PART_MAIN), LV_OPA_TRANSP);
-        lv_anim_set_exec_cb(&anim, mode_opa_anim_cb);
-        lv_anim_set_duration(&anim, 180);
-        lv_anim_set_path_cb(&anim, lv_anim_path_ease_in);
-        lv_anim_set_completed_cb(&anim, mode_hide_done_cb);
-        lv_anim_start(&anim);
+        s_vp_mode_preview = false;
+        lv_obj_set_style_opa(s_mode, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_translate_y(s_mode, 0, LV_PART_MAIN);
+        lv_obj_set_y(s_mode, (lv_coord_t)MY_SCREEN_HEIGHT);
+        lv_obj_add_flag(s_mode, LV_OBJ_FLAG_HIDDEN);
+        if(s_mode_dim != NULL && lv_obj_is_valid(s_mode_dim)) {
+            lv_obj_add_flag(s_mode_dim, LV_OBJ_FLAG_HIDDEN);
+        }
     }
 }
 
@@ -891,70 +744,25 @@ static void mode_icon_clicked_cb(lv_event_t *e)
         return;
     }
     const uintptr_t slot = (uintptr_t)lv_event_get_user_data(e);
-    if(slot >= s_mode_strip_slot_n) {
+    if(s_mode_strip == NULL || !lv_obj_is_valid(s_mode_strip)) {
         return;
     }
-    if(s_mode_strip == NULL || !lv_obj_is_valid(s_mode_strip) || s_mode_pages[slot] == NULL ||
-       !lv_obj_is_valid(s_mode_pages[slot])) {
+    if(slot >= ui_mode_carousel_phys_count(s_mode_strip)) {
+        return;
+    }
+    lv_obj_t *page = ui_mode_carousel_page(s_mode_strip, (uint32_t)slot);
+    if(page == NULL || !lv_obj_is_valid(page)) {
         return;
     }
     lv_obj_update_layout(s_mode_strip);
-    const uint32_t centered = main_mode_strip_nearest_index(s_mode_strip);
+    const uint32_t centered = ui_mode_carousel_nearest_index(s_mode_strip);
     if((uint32_t)slot != centered) {
-        lv_obj_scroll_to_view(s_mode_pages[slot], LV_ANIM_ON);
+        lv_obj_scroll_to_view(page, LV_ANIM_ON);
         return;
     }
-    ui_app_set_shoot_mode(s_mode_strip_mode_at[slot]);
+    ui_app_set_shoot_mode(ui_mode_carousel_mode_at(s_mode_strip, (uint32_t)slot));
     main_mode_update_card_selection();
-    main_refresh_status_bar();
     main_show_mode_panel(false);
-}
-
-/** 底栏「模式显示区」：点击进入模式全屏页。 */
-static void main_bottom_mode_cell_cb(lv_event_t *e)
-{
-    if(lv_event_get_code(e) != LV_EVENT_CLICKED) {
-        return;
-    }
-    LOG_DEBUG("底栏模式显示区点击进入模式页");
-    main_show_mode_panel(true);
-}
-
-/** 懒创建右缘黑色半透明「回放窥视」条（右滑跟手用）。 */
-static void main_replay_peek_ensure(lv_obj_t *scr)
-{
-    if(s_vp_replay_peek != NULL && lv_obj_is_valid(s_vp_replay_peek)) {
-        return;
-    }
-    s_vp_replay_peek = lv_obj_create(scr);
-    lv_obj_remove_flag(s_vp_replay_peek, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_remove_flag(s_vp_replay_peek, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_size(s_vp_replay_peek, 0, MY_SCREEN_HEIGHT);
-    lv_obj_align(s_vp_replay_peek, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_set_style_bg_color(s_vp_replay_peek, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(s_vp_replay_peek, LV_OPA_40, 0);
-    lv_obj_set_style_border_width(s_vp_replay_peek, 0, 0);
-    lv_obj_add_flag(s_vp_replay_peek, LV_OBJ_FLAG_HIDDEN);
-}
-
-/** 按千分比设置窥视条宽度；0 则隐藏。 */
-static void main_replay_peek_set(int32_t permille)
-{
-    if(s_vp_replay_peek == NULL || !lv_obj_is_valid(s_vp_replay_peek)) {
-        return;
-    }
-    if(permille <= 0) {
-        lv_obj_add_flag(s_vp_replay_peek, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_width(s_vp_replay_peek, 0);
-        return;
-    }
-    lv_coord_t w = (lv_coord_t)((int32_t)UI_SWIPE_COMMIT_DX * LV_MIN(permille, 1000) / 1000);
-    if(w < 1) {
-        w = 1;
-    }
-    lv_obj_set_width(s_vp_replay_peek, w);
-    lv_obj_clear_flag(s_vp_replay_peek, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(s_vp_replay_peek);
 }
 
 /** 预览区下拉跟手：按千分比移动控制中心 sheet 与遮罩透明度（未提交打开）。 */
@@ -979,7 +787,8 @@ static void main_cc_apply_drag_permille(int32_t permille)
     lv_obj_move_foreground(s_cc_sheet);
     const int32_t y = -s_cc_sheet_h + (permille * (int32_t)s_cc_sheet_h) / 1000;
     lv_obj_set_y(s_cc_sheet, (lv_coord_t)y);
-    lv_obj_set_style_bg_opa(s_cc_dim, (lv_opa_t)((int32_t)LV_OPA_50 * LV_MIN(permille, 1000) / 1000), 0);
+    /* 遮罩不透明跟手：避免出现「随下拉渐显」的淡入感，仅 sheet 位移跟随手势 */
+    lv_obj_set_style_bg_opa(s_cc_dim, LV_OPA_50, 0);
 }
 
 /** 下拉手势提交：完全展开控制中心并进入宫格视图。 */
@@ -1001,10 +810,15 @@ static void main_cc_commit_from_drag(void)
     cc_lang_dd_sync_from_i18n();
 }
 
-/** 控制中心跟手取消动画结束：清 `s_vp_cc_drag`，未真正打开则隐藏层。 */
-static void vp_cc_drag_cancel_done_cb(lv_anim_t *a)
+/** 瞬时收回未提交的预览下拉（无收回动画）。 */
+static void main_cc_cancel_drag_anim(void)
 {
-    LV_UNUSED(a);
+    if(!s_vp_cc_drag || s_cc_open || s_cc_sheet == NULL) {
+        s_vp_cc_drag = false;
+        return;
+    }
+    lv_anim_delete(s_cc_sheet, cc_sheet_y_anim_cb);
+    lv_obj_set_y(s_cc_sheet, -s_cc_sheet_h);
     s_vp_cc_drag = false;
     if(!s_cc_open) {
         if(s_cc_dim != NULL && lv_obj_is_valid(s_cc_dim)) {
@@ -1017,27 +831,7 @@ static void vp_cc_drag_cancel_done_cb(lv_anim_t *a)
     }
 }
 
-/** 播放 sheet 收回动画以取消未提交的预览下拉。 */
-static void main_cc_cancel_drag_anim(void)
-{
-    if(!s_vp_cc_drag || s_cc_open || s_cc_sheet == NULL) {
-        s_vp_cc_drag = false;
-        return;
-    }
-    lv_anim_delete(s_cc_sheet, cc_sheet_y_anim_cb);
-    lv_coord_t y0 = lv_obj_get_y(s_cc_sheet);
-    lv_anim_t anim;
-    lv_anim_init(&anim);
-    lv_anim_set_var(&anim, s_cc_sheet);
-    lv_anim_set_values(&anim, y0, -s_cc_sheet_h);
-    lv_anim_set_exec_cb(&anim, cc_sheet_y_anim_cb);
-    lv_anim_set_duration(&anim, 160);
-    lv_anim_set_path_cb(&anim, lv_anim_path_ease_in);
-    lv_anim_set_completed_cb(&anim, vp_cc_drag_cancel_done_cb);
-    lv_anim_start(&anim);
-}
-
-/** 预览区上滑跟手：按千分比设置模式全屏层透明度（未提交打开）。 */
+/** 预览区上滑跟手：与下拉控制中心一致——**遮罩 + 层 `y`**，主界面不位移（不用 `translate_y`）。 */
 static void main_mode_apply_drag_permille(int32_t permille)
 {
     if(s_mode == NULL || s_mode_open) {
@@ -1045,15 +839,29 @@ static void main_mode_apply_drag_permille(int32_t permille)
     }
     if(permille <= 0) {
         s_vp_mode_preview = false;
-        lv_anim_delete(s_mode, mode_opa_anim_cb);
+        if(s_mode_dim != NULL && lv_obj_is_valid(s_mode_dim)) {
+            lv_obj_add_flag(s_mode_dim, LV_OBJ_FLAG_HIDDEN);
+        }
         lv_obj_add_flag(s_mode, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_opa(s_mode, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_translate_y(s_mode, 0, LV_PART_MAIN);
+        lv_obj_set_y(s_mode, (lv_coord_t)MY_SCREEN_HEIGHT);
         return;
     }
     s_vp_mode_preview = true;
-    lv_anim_delete(s_mode, mode_opa_anim_cb);
+    if(s_mode_dim != NULL && lv_obj_is_valid(s_mode_dim)) {
+        lv_obj_clear_flag(s_mode_dim, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_bg_opa(s_mode_dim, LV_OPA_50, 0);
+        lv_obj_move_foreground(s_mode_dim);
+    }
     lv_obj_clear_flag(s_mode, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_style_opa(s_mode, (lv_opa_t)((int32_t)LV_OPA_COVER * LV_MIN(permille, 1000) / 1000), LV_PART_MAIN);
+    lv_obj_set_style_opa(s_mode, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(s_mode, 0, LV_PART_MAIN);
+    {
+        const int32_t p = LV_MIN(permille, 1000);
+        const lv_coord_t y = (lv_coord_t)(((int32_t)MY_SCREEN_HEIGHT * (1000 - p)) / 1000);
+        lv_obj_set_y(s_mode, y);
+    }
     lv_obj_move_foreground(s_mode);
 }
 
@@ -1063,14 +871,20 @@ static void main_mode_commit_from_drag(void)
     if(s_mode == NULL) {
         return;
     }
-    lv_anim_delete(s_mode, mode_opa_anim_cb);
     s_vp_mode_preview = false;
     s_mode_open = true;
+    if(s_mode_dim != NULL && lv_obj_is_valid(s_mode_dim)) {
+        lv_obj_clear_flag(s_mode_dim, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_bg_opa(s_mode_dim, LV_OPA_50, 0);
+        lv_obj_move_foreground(s_mode_dim);
+    }
     lv_obj_clear_flag(s_mode, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_opa(s_mode, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(s_mode, 0, LV_PART_MAIN);
+    lv_obj_set_y(s_mode, 0);
     lv_obj_move_foreground(s_mode);
     lv_obj_update_layout(s_mode);
-    main_mode_strip_scroll_to_current();
+    main_mode_strip_scroll_to_current(false);
 }
 
 /** 预览区左滑跟手：按千分比设置 ISP 侧栏宽度（未提交展开）。 */
@@ -1099,6 +913,17 @@ static void main_isp_apply_drag_permille(int32_t permille)
     if(mid) {
         lv_obj_update_layout(mid);
     }
+}
+
+/**
+ * 右滑进入回放：与上/下滑一致 **不做右缘半透明跟手条**（旧实现会在画面右侧叠灰条，且与 ISP 列同区易透出 ISP 文案）。
+ * 仅清空其它方向的跟手预览；ISP 已展开时保持展开直至松手提交切页。
+ */
+static void main_vp_replay_drag_side_effects(void)
+{
+    main_cc_apply_drag_permille(0);
+    main_mode_apply_drag_permille(0);
+    main_isp_apply_drag_permille(0);
 }
 
 /** 根据锁定方向与位移计算跟手千分比（相对 `UI_SWIPE_COMMIT_*`）。 */
@@ -1158,12 +983,11 @@ static bool main_vp_release_commit_ok(main_vp_dir_t dir, int dx, int dy)
     }
 }
 
-/** 取消预览跟手：复位窥视条、模式/ISP 预览；控制中心预览可动画或瞬时收回。 */
+/** 取消预览跟手：复位模式/ISP 预览；控制中心预览可动画或瞬时收回。 */
 static void main_vp_cancel_drag(bool instant)
 {
     s_vp_dir = MAIN_VP_DIR_NONE;
 
-    main_replay_peek_set(0);
     main_mode_apply_drag_permille(0);
     main_isp_apply_drag_permille(0);
 
@@ -1188,12 +1012,14 @@ static void main_vp_cancel_drag(bool instant)
 /**
  * @brief 主界面全屏四向滑动手势（绑定在 `scr` + 子控件 EVENT_BUBBLE）。
  *
- * PRESSED 记点；PRESSING 按锁定方向跟手预览（位移达屏宽/高 COMMIT 分数为满行程）；RELEASED 达到提交条件则进入对应页。
+ * PRESSED 记点；PRESSING 锁定主向后按位移给 0～1000‰ 跟手预览（右滑进回放 **无** 右缘条，与上/下滑一致）；滑回锁阈内可解锁改向；副轴超阈仅清空预览、不丢跟踪。
+ * RELEASED 仅按 **松手点** 相对起点的位移判定是否提交（先达阈再回退则不会提交）。
  * 控制中心/模式层打开时不处理，避免与覆盖层冲突。
  */
 static void main_viewport_gesture_cb(lv_event_t *e)
 {
     lv_obj_t *scr = lv_event_get_user_data(e);
+    (void)scr;
     lv_event_code_t code = lv_event_get_code(e);
     lv_indev_t *indev = lv_indev_active();
     if(indev == NULL) {
@@ -1242,11 +1068,20 @@ static void main_viewport_gesture_cb(lv_event_t *e)
                 s_vp_dir = (dy > 0) ? MAIN_VP_DIR_DOWN : MAIN_VP_DIR_UP;
             }
         }
-
-        if(main_vp_cross_axis_bad(s_vp_dir, adx, ady)) {
-            s_vp_tracking = false;
-            main_vp_cancel_drag(false);
+        else if(adx < UI_SWIPE_DIR_LOCK_PX && ady < UI_SWIPE_DIR_LOCK_PX) {
+            /* 滑回按压点附近：解锁主向，可不抬手改方向；跟手预览清零 */
             s_vp_dir = MAIN_VP_DIR_NONE;
+            main_cc_apply_drag_permille(0);
+            main_mode_apply_drag_permille(0);
+            main_isp_apply_drag_permille(0);
+            return;
+        }
+
+        /* 副轴超阈：仅清空跟手预览，不结束跟踪；回退到合规位移后可继续跟手，松手仍以终点判定 */
+        if(main_vp_cross_axis_bad(s_vp_dir, adx, ady)) {
+            main_cc_apply_drag_permille(0);
+            main_mode_apply_drag_permille(0);
+            main_isp_apply_drag_permille(0);
             return;
         }
 
@@ -1257,16 +1092,9 @@ static void main_viewport_gesture_cb(lv_event_t *e)
 
         switch(s_vp_dir) {
             case MAIN_VP_DIR_RIGHT:
-                if(scr != NULL) {
-                    main_replay_peek_ensure(scr);
-                }
-                main_replay_peek_set(pm);
-                main_cc_apply_drag_permille(0);
-                main_mode_apply_drag_permille(0);
-                main_isp_apply_drag_permille(0);
+                main_vp_replay_drag_side_effects();
                 break;
             case MAIN_VP_DIR_LEFT:
-                main_replay_peek_set(0);
                 main_cc_apply_drag_permille(0);
                 main_mode_apply_drag_permille(0);
                 if(!s_isp_open) {
@@ -1274,13 +1102,11 @@ static void main_viewport_gesture_cb(lv_event_t *e)
                 }
                 break;
             case MAIN_VP_DIR_DOWN:
-                main_replay_peek_set(0);
                 main_mode_apply_drag_permille(0);
                 main_isp_apply_drag_permille(0);
                 main_cc_apply_drag_permille(pm);
                 break;
             case MAIN_VP_DIR_UP:
-                main_replay_peek_set(0);
                 main_cc_apply_drag_permille(0);
                 main_isp_apply_drag_permille(0);
                 main_mode_apply_drag_permille(pm);
@@ -1329,7 +1155,6 @@ static void main_viewport_gesture_cb(lv_event_t *e)
         switch(s_vp_dir) {
             case MAIN_VP_DIR_RIGHT:
                 LOG_DEBUG("用户右滑");
-                main_replay_peek_set(0);
                 main_cc_apply_drag_permille(0);
                 main_mode_apply_drag_permille(0);
                 main_isp_apply_drag_permille(0);
@@ -1338,7 +1163,6 @@ static void main_viewport_gesture_cb(lv_event_t *e)
                 break;
             case MAIN_VP_DIR_LEFT:
                 LOG_DEBUG("左滑 ISP");
-                main_replay_peek_set(0);
                 main_cc_apply_drag_permille(0);
                 main_mode_apply_drag_permille(0);
                 s_vp_isp_preview = false;
@@ -1346,7 +1170,6 @@ static void main_viewport_gesture_cb(lv_event_t *e)
                 break;
             case MAIN_VP_DIR_DOWN:
                 LOG_DEBUG("下拉控制中心");
-                main_replay_peek_set(0);
                 main_mode_apply_drag_permille(0);
                 main_isp_apply_drag_permille(0);
                 if(!s_cc_open) {
@@ -1355,7 +1178,6 @@ static void main_viewport_gesture_cb(lv_event_t *e)
                 break;
             case MAIN_VP_DIR_UP:
                 LOG_DEBUG("上滑模式参数");
-                main_replay_peek_set(0);
                 main_cc_apply_drag_permille(0);
                 main_isp_apply_drag_permille(0);
                 if(!s_mode_open) {
@@ -1373,56 +1195,24 @@ static void main_viewport_gesture_cb(lv_event_t *e)
     s_vp_dir = MAIN_VP_DIR_NONE;
 }
 
-#if UI_FEATURE_DISPLAY_ROTATION
-
-/*
- * 用户语义是“顺时针 0/90/180/270”，而 LVGL 显示旋转方向与绘制角度定义相反。
- * 这里做映射：CW90 -> LV_DISPLAY_ROTATION_270，CW270 -> LV_DISPLAY_ROTATION_90。
- */
-static const lv_display_rotation_t s_cc_rot_map[4] = {
-    LV_DISPLAY_ROTATION_0,
-    LV_DISPLAY_ROTATION_270,
-    LV_DISPLAY_ROTATION_180,
-    LV_DISPLAY_ROTATION_90,
-};
-
-/** 从默认 display 读旋转角，同步 `s_cc_rot_*` 与开关状态。 */
-static void cc_rot_sync_from_display(void)
+void ui_page_main_scr_detach_gestures(lv_obj_t *scr)
 {
-    lv_display_t *d = lv_display_get_default();
-    if(d == NULL) {
+    if(scr == NULL) {
         return;
     }
-    const lv_display_rotation_t r = lv_display_get_rotation(d);
-    s_cc_rot_enabled = (r != LV_DISPLAY_ROTATION_0);
-    switch(r) {
-        case LV_DISPLAY_ROTATION_0:
-            s_cc_rot_sel_idx = 0;
-            break;
-        case LV_DISPLAY_ROTATION_270: /* CW 90 */
-            s_cc_rot_sel_idx = 1;
-            break;
-        case LV_DISPLAY_ROTATION_180:
-            s_cc_rot_sel_idx = 2;
-            break;
-        case LV_DISPLAY_ROTATION_90: /* CW 270 */
-            s_cc_rot_sel_idx = 3;
-            break;
-        default:
-            s_cc_rot_sel_idx = 0;
-            break;
-    }
+    lv_obj_remove_event_cb(scr, main_viewport_gesture_cb);
 }
 
-/** 按 `s_cc_rot_sel_idx` 更新四个角度按钮描边焦点。 */
+/** 按 `ui_cc_settings_get_rotation_index()` 更新四个角度按钮描边焦点。 */
 static void cc_rot_refresh_angle_focus(void)
 {
+    const uint8_t sel = ui_cc_settings_get_rotation_index();
     for(unsigned i = 0; i < 4; i++) {
         lv_obj_t *b = s_cc_rot_angle_btns[i];
         if(b == NULL || !lv_obj_is_valid(b)) {
             continue;
         }
-        if(i == s_cc_rot_sel_idx) {
+        if(i == sel) {
             lv_obj_set_style_outline_width(b, 3, 0);
             lv_obj_set_style_outline_opa(b, LV_OPA_COVER, 0);
             lv_obj_set_style_outline_color(b, lv_palette_main(LV_PALETTE_BLUE), 0);
@@ -1435,21 +1225,6 @@ static void cc_rot_refresh_angle_focus(void)
     }
 }
 
-/** 根据开关与选中角度应用 `ui_display_apply_rotation` 并刷新根屏布局。 */
-static void cc_rot_apply_from_ui(void)
-{
-    if(!s_cc_rot_enabled) {
-        ui_display_apply_rotation(LV_DISPLAY_ROTATION_0);
-        return;
-    }
-    ui_display_apply_rotation(s_cc_rot_map[s_cc_rot_sel_idx]);
-    lv_obj_t *scr = lv_scr_act();
-    if(scr != NULL && lv_obj_is_valid(scr)) {
-        lv_obj_update_layout(scr);
-    }
-}
-
-/** 角度按钮点击：更新选中索引、焦点与显示旋转。 */
 static void cc_rot_angle_clicked_cb(lv_event_t *e)
 {
     if(lv_event_get_code(e) != LV_EVENT_CLICKED) {
@@ -1459,44 +1234,40 @@ static void cc_rot_angle_clicked_cb(lv_event_t *e)
     if(i >= 4) {
         return;
     }
-    s_cc_rot_sel_idx = (uint8_t)i;
+    ui_cc_settings_set_rotation(ui_cc_settings_get_rotation_enabled(), (uint8_t)i);
     cc_rot_refresh_angle_focus();
-    cc_rot_apply_from_ui();
 }
 
-/** 旋转总开关：控制角度列表显隐并应用旋转。 */
 static void cc_rot_switch_changed_cb(lv_event_t *e)
 {
     if(lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
         return;
     }
     lv_obj_t *sw = lv_event_get_target(e);
-    s_cc_rot_enabled = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    const bool en = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    ui_cc_settings_set_rotation(en, ui_cc_settings_get_rotation_index());
     if(s_cc_rot_angle_list != NULL && lv_obj_is_valid(s_cc_rot_angle_list)) {
-        if(s_cc_rot_enabled) {
+        if(en) {
             lv_obj_remove_flag(s_cc_rot_angle_list, LV_OBJ_FLAG_HIDDEN);
         }
         else {
             lv_obj_add_flag(s_cc_rot_angle_list, LV_OBJ_FLAG_HIDDEN);
         }
     }
-    cc_rot_apply_from_ui();
+    cc_rot_refresh_angle_focus();
 }
 
-/** 旋转子页返回：回到控制中心宫格。 */
 static void cc_rotation_back_cb(lv_event_t *e)
 {
     LV_UNUSED(e);
     cc_show_grid_view();
 }
 
-/** 显示旋转设置全屏子视图并同步控件状态。 */
 static void cc_show_rotation_view(void)
 {
     if(s_cc_rotation_panel == NULL || !lv_obj_is_valid(s_cc_rotation_panel)) {
         return;
     }
-    cc_rot_sync_from_display();
     if(s_cc_grid != NULL && lv_obj_is_valid(s_cc_grid)) {
         lv_obj_add_flag(s_cc_grid, LV_OBJ_FLAG_HIDDEN);
     }
@@ -1506,7 +1277,7 @@ static void cc_show_rotation_view(void)
     lv_obj_remove_flag(s_cc_rotation_panel, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(s_cc_rotation_panel);
     if(s_cc_rot_switch != NULL && lv_obj_is_valid(s_cc_rot_switch)) {
-        if(s_cc_rot_enabled) {
+        if(ui_cc_settings_get_rotation_enabled()) {
             lv_obj_add_state(s_cc_rot_switch, LV_STATE_CHECKED);
         }
         else {
@@ -1514,7 +1285,7 @@ static void cc_show_rotation_view(void)
         }
     }
     if(s_cc_rot_angle_list != NULL && lv_obj_is_valid(s_cc_rot_angle_list)) {
-        if(s_cc_rot_enabled) {
+        if(ui_cc_settings_get_rotation_enabled()) {
             lv_obj_remove_flag(s_cc_rot_angle_list, LV_OBJ_FLAG_HIDDEN);
         }
         else {
@@ -1524,12 +1295,12 @@ static void cc_show_rotation_view(void)
     cc_rot_refresh_angle_focus();
 }
 
-/** 在控制中心 body 内创建旋转面板（默认隐藏）。 */
+/** 在控制中心 body 内创建旋转详情（默认隐藏，与系统设置子页同级）。 */
 static void main_cc_create_rotation_panel(lv_obj_t *cc_body)
 {
     s_cc_rotation_panel = lv_obj_create(cc_body);
     lv_obj_set_size(s_cc_rotation_panel, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_color(s_cc_rotation_panel, lv_color_hex(0xF0F0F0), 0);
+    lv_obj_set_style_bg_color(s_cc_rotation_panel, lv_color_hex(UI_THEME_CC_PAGE_BG), 0);
     lv_obj_set_style_border_width(s_cc_rotation_panel, 0, 0);
     lv_obj_set_style_pad_all(s_cc_rotation_panel, 8, 0);
     lv_obj_remove_flag(s_cc_rotation_panel, LV_OBJ_FLAG_SCROLLABLE);
@@ -1556,13 +1327,13 @@ static void main_cc_create_rotation_panel(lv_obj_t *cc_body)
 
     lv_obj_t *rb = lv_obj_create(rh);
     lv_obj_set_size(rb, 72, 40);
-    lv_obj_set_style_bg_color(rb, lv_color_hex(0xDDDDDD), 0);
+    lv_obj_set_style_bg_color(rb, lv_color_hex(UI_THEME_CC_BACK_BTN_BG), 0);
     lv_obj_set_style_border_width(rb, 0, 0);
     lv_obj_remove_flag(rb, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(rb, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(rb, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_add_event_cb(rb, cc_rotation_back_cb, LV_EVENT_CLICKED, NULL);
-    cc_lang_ctrl_apply_focus_visual(rb);
+    ui_style_cc_interactive_focus(rb);
     lv_obj_t *rbl = lv_label_create(rb);
     ui_i18n_bind_label(rbl, UI_STR_SETTINGS_BACK);
     lv_label_set_long_mode(rbl, LV_LABEL_LONG_CLIP);
@@ -1596,7 +1367,7 @@ static void main_cc_create_rotation_panel(lv_obj_t *cc_body)
     s_cc_rot_switch = lv_switch_create(en_row);
     lv_obj_add_flag(s_cc_rot_switch, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_add_event_cb(s_cc_rot_switch, cc_rot_switch_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
-    cc_lang_ctrl_apply_focus_visual(s_cc_rot_switch);
+    ui_style_cc_interactive_focus(s_cc_rot_switch);
 
     s_cc_rot_angle_list = lv_obj_create(s_cc_rotation_panel);
     lv_obj_set_width(s_cc_rot_angle_list, LV_PCT(100));
@@ -1623,13 +1394,15 @@ static void main_cc_create_rotation_panel(lv_obj_t *cc_body)
         s_cc_rot_angle_btns[i] = b;
         lv_obj_set_width(b, LV_PCT(100));
         lv_obj_set_height(b, 44);
-        lv_obj_set_style_bg_color(b, lv_color_hex(UI_ZONE_CYAN), 0);
+        lv_obj_set_style_bg_color(b, lv_color_hex(UI_CC_SETTINGS_ROW_BG), 0);
+        lv_obj_set_style_bg_opa(b, UI_CC_SETTINGS_ROW_BG_OPA, 0);
+        lv_obj_set_style_border_color(b, lv_color_hex(UI_CC_SETTINGS_ROW_BORDER), 0);
+        lv_obj_set_style_border_width(b, UI_CC_SETTINGS_ROW_BORDER_W, 0);
         lv_obj_set_style_radius(b, 8, 0);
-        lv_obj_set_style_border_width(b, 0, 0);
         lv_obj_remove_flag(b, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_flag(b, LV_OBJ_FLAG_EVENT_BUBBLE);
-        cc_lang_ctrl_apply_focus_visual(b);
+        ui_style_cc_interactive_focus(b);
         lv_obj_add_event_cb(b, cc_rot_angle_clicked_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
         lv_obj_t *bl = lv_label_create(b);
         ui_i18n_bind_label(bl, angle_ids[i]);
@@ -1637,10 +1410,16 @@ static void main_cc_create_rotation_panel(lv_obj_t *cc_body)
         ui_style_zone_label(bl);
         lv_obj_center(bl);
     }
+    if(ui_cc_settings_get_rotation_enabled()) {
+        lv_obj_add_state(s_cc_rot_switch, LV_STATE_CHECKED);
+        lv_obj_remove_flag(s_cc_rot_angle_list, LV_OBJ_FLAG_HIDDEN);
+    }
+    else {
+        lv_obj_remove_state(s_cc_rot_switch, LV_STATE_CHECKED);
+        lv_obj_add_flag(s_cc_rot_angle_list, LV_OBJ_FLAG_HIDDEN);
+    }
     cc_rot_refresh_angle_focus();
 }
-
-#endif /* UI_FEATURE_DISPLAY_ROTATION */
 
 /**
  * @brief 创建全屏控制中心：遮罩、sheet、宫格与设置子页。
@@ -1664,7 +1443,7 @@ static void main_create_control_center(lv_obj_t *scr)
     s_cc_sheet = lv_obj_create(scr);
     lv_obj_set_size(s_cc_sheet, MY_SCREEN_WIDTH, s_cc_sheet_h);
     lv_obj_set_pos(s_cc_sheet, 0, -s_cc_sheet_h);
-    lv_obj_set_style_bg_color(s_cc_sheet, lv_color_hex(0xE8E8E8), 0);
+    lv_obj_set_style_bg_color(s_cc_sheet, lv_color_hex(UI_THEME_CC_SHEET_BG), 0);
     lv_obj_set_style_border_width(s_cc_sheet, 0, 0);
     lv_obj_set_style_pad_left(s_cc_sheet, 12, 0);
     lv_obj_set_style_pad_right(s_cc_sheet, 12, 0);
@@ -1709,27 +1488,40 @@ static void main_create_control_center(lv_obj_t *scr)
         const int r = (int)(i / 4u);
         lv_obj_set_grid_cell(cell, LV_GRID_ALIGN_STRETCH, c, 1, LV_GRID_ALIGN_STRETCH, r, 1);
         lv_obj_remove_flag(cell, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_set_style_bg_color(cell, lv_color_hex(UI_ZONE_CYAN), 0);
+        lv_obj_set_style_bg_color(cell, lv_color_hex(UI_CC_SETTINGS_ROW_BG), 0);
+        lv_obj_set_style_bg_opa(cell, UI_CC_SETTINGS_ROW_BG_OPA, 0);
+        lv_obj_set_style_border_color(cell, lv_color_hex(UI_CC_SETTINGS_ROW_BORDER), 0);
+        lv_obj_set_style_border_width(cell, UI_CC_SETTINGS_ROW_BORDER_W, 0);
         lv_obj_set_style_radius(cell, 10, 0);
-        lv_obj_set_style_border_width(cell, 0, 0);
         lv_obj_set_layout(cell, LV_LAYOUT_FLEX);
         lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        cc_lang_ctrl_apply_focus_visual(cell);
+        ui_style_cc_interactive_focus(cell);
         lv_obj_add_event_cb(cell, cc_tile_clicked_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
         lv_obj_add_flag(cell, LV_OBJ_FLAG_EVENT_BUBBLE);
 
         lv_obj_t *lb = lv_label_create(cell);
-        ui_i18n_bind_label(lb, s_cc_tile_str_ids[i]);
-        lv_label_set_long_mode(lb, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(lb, LV_PCT(92));
-        lv_obj_set_style_text_align(lb, LV_TEXT_ALIGN_CENTER, 0);
-        ui_style_zone_label(lb);
+        if(i == 6u) {
+            s_cc_quick_tile_l = lb;
+            lv_label_set_long_mode(lb, LV_LABEL_LONG_WRAP);
+            lv_obj_set_width(lb, LV_PCT(92));
+            lv_obj_set_style_text_align(lb, LV_TEXT_ALIGN_CENTER, 0);
+            main_refresh_cc_quick_tile_label();
+        }
+        else {
+            ui_i18n_bind_label(lb, s_cc_tile_str_ids[i]);
+            lv_label_set_long_mode(lb, LV_LABEL_LONG_WRAP);
+            lv_obj_set_width(lb, LV_PCT(92));
+            lv_obj_set_style_text_align(lb, LV_TEXT_ALIGN_CENTER, 0);
+            ui_style_zone_label(lb);
+        }
     }
+
+    main_cc_create_rotation_panel(cc_body);
 
     s_cc_settings = lv_obj_create(cc_body);
     lv_obj_set_size(s_cc_settings, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_color(s_cc_settings, lv_color_hex(0xF0F0F0), 0);
+    lv_obj_set_style_bg_color(s_cc_settings, lv_color_hex(UI_THEME_CC_PAGE_BG), 0);
     lv_obj_set_style_border_width(s_cc_settings, 0, 0);
     lv_obj_set_style_pad_all(s_cc_settings, 8, 0);
     lv_obj_remove_flag(s_cc_settings, LV_OBJ_FLAG_SCROLLABLE);
@@ -1756,13 +1548,13 @@ static void main_create_control_center(lv_obj_t *scr)
 
     lv_obj_t *back_btn = lv_obj_create(set_hdr);
     lv_obj_set_size(back_btn, 72, 40);
-    lv_obj_set_style_bg_color(back_btn, lv_color_hex(0xDDDDDD), 0);
+    lv_obj_set_style_bg_color(back_btn, lv_color_hex(UI_THEME_CC_BACK_BTN_BG), 0);
     lv_obj_set_style_border_width(back_btn, 0, 0);
     lv_obj_remove_flag(back_btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(back_btn, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(back_btn, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_add_event_cb(back_btn, cc_settings_back_cb, LV_EVENT_CLICKED, NULL);
-    cc_lang_ctrl_apply_focus_visual(back_btn);
+    ui_style_cc_interactive_focus(back_btn);
     lv_obj_t *back_l = lv_label_create(back_btn);
     ui_i18n_bind_label(back_l, UI_STR_SETTINGS_BACK);
     lv_label_set_long_mode(back_l, LV_LABEL_LONG_CLIP);
@@ -1782,6 +1574,7 @@ static void main_create_control_center(lv_obj_t *scr)
     lv_obj_set_style_border_width(set_list, 0, 0);
     s_cc_set_list = set_list;
     lv_obj_add_flag(set_list, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(set_list, LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM);
     lv_obj_set_scroll_dir(set_list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(set_list, LV_SCROLLBAR_MODE_AUTO);
     lv_obj_add_flag(set_list, LV_OBJ_FLAG_CLICKABLE);
@@ -1795,10 +1588,7 @@ static void main_create_control_center(lv_obj_t *scr)
 
     lv_obj_t *lang_row = lv_obj_create(set_list);
     lv_obj_set_width(lang_row, LV_PCT(100));
-    lv_obj_set_height(lang_row, 48);
-    lv_obj_set_style_bg_opa(lang_row, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(lang_row, 0, 0);
-    lv_obj_remove_flag(lang_row, LV_OBJ_FLAG_SCROLLABLE);
+    ui_style_cc_settings_row_apply(lang_row);
     lv_obj_remove_flag(lang_row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(lang_row, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_set_layout(lang_row, LV_LAYOUT_FLEX);
@@ -1826,11 +1616,13 @@ static void main_create_control_center(lv_obj_t *scr)
     lv_dropdown_set_selected(s_cc_lang_dd, ui_i18n_get_lang() == UI_LANG_ZH ? 0u : 1u);
     lv_obj_set_style_min_width(s_cc_lang_dd, 140, LV_PART_MAIN);
     lv_obj_set_height(s_cc_lang_dd, 40);
-    lv_obj_set_style_bg_color(s_cc_lang_dd, lv_color_hex(UI_ZONE_CYAN), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_cc_lang_dd, lv_color_hex(UI_CC_SETTINGS_CTRL_BG), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_cc_lang_dd, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(s_cc_lang_dd, 8, LV_PART_MAIN);
     lv_obj_set_style_pad_hor(s_cc_lang_dd, 12, LV_PART_MAIN);
     lv_obj_set_style_pad_ver(s_cc_lang_dd, 6, LV_PART_MAIN);
-    lv_obj_set_style_border_width(s_cc_lang_dd, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_cc_lang_dd, UI_CC_SETTINGS_ROW_BORDER_W, LV_PART_MAIN);
+    lv_obj_set_style_border_color(s_cc_lang_dd, lv_color_hex(UI_CC_SETTINGS_CTRL_BORDER), LV_PART_MAIN);
     {
         const lv_font_t *f = ui_font_cjk();
         lv_obj_set_style_text_font(s_cc_lang_dd, f != NULL ? f : LV_FONT_DEFAULT, LV_PART_MAIN);
@@ -1838,7 +1630,7 @@ static void main_create_control_center(lv_obj_t *scr)
     }
     lv_obj_add_flag(s_cc_lang_dd, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_add_event_cb(s_cc_lang_dd, cc_lang_dd_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
-    cc_lang_ctrl_apply_focus_visual(s_cc_lang_dd);
+    ui_style_cc_interactive_focus(s_cc_lang_dd);
 
     lv_obj_t *dd_list = lv_dropdown_get_list(s_cc_lang_dd);
     if(dd_list != NULL) {
@@ -1847,62 +1639,71 @@ static void main_create_control_center(lv_obj_t *scr)
         lv_obj_set_style_text_font(dd_list, f != NULL ? f : LV_FONT_DEFAULT, LV_PART_SELECTED);
     }
 
-    static const ui_str_id_t set_item_ids[] = {
-        UI_STR_SETTINGS_DATETIME,
-        UI_STR_SETTINGS_POWER_SLEEP,
-        UI_STR_SETTINGS_BATTERY,
-        UI_STR_SETTINGS_THERMAL,
-        UI_STR_SETTINGS_SDCARD,
-        UI_STR_SETTINGS_FIRMWARE,
-        UI_STR_SETTINGS_LOG,
-        UI_STR_SETTINGS_SECURITY,
-        UI_STR_SETTINGS_BT,
-        UI_STR_SETTINGS_WIFI,
-        UI_STR_SETTINGS_USB,
-        UI_STR_SETTINGS_EXPORT,
-        UI_STR_SETTINGS_DEVICE,
-        UI_STR_SETTINGS_FACTORY,
+    /** 与 `UI_SETTINGS_SHOW_*`（`ui_settings_config.h`）一一对应；符号见 `lvgl/src/font/lv_symbol_def.h` */
+    static const struct {
+        ui_str_id_t id;
+        const char *sym;
+    } s_cc_settings_rows[] = {
+#if UI_SETTINGS_SHOW_DATETIME
+        { UI_STR_SETTINGS_DATETIME, LV_SYMBOL_LOOP },
+#endif
+#if UI_SETTINGS_SHOW_POWER_SLEEP
+        { UI_STR_SETTINGS_POWER_SLEEP, LV_SYMBOL_POWER },
+#endif
+#if UI_SETTINGS_SHOW_BATTERY
+        { UI_STR_SETTINGS_BATTERY, LV_SYMBOL_BATTERY_FULL },
+#endif
+#if UI_SETTINGS_SHOW_THERMAL
+        { UI_STR_SETTINGS_THERMAL, LV_SYMBOL_WARNING },
+#endif
+#if UI_SETTINGS_SHOW_SDCARD
+        { UI_STR_SETTINGS_SDCARD, LV_SYMBOL_SD_CARD },
+#endif
+#if UI_SETTINGS_SHOW_FIRMWARE
+        { UI_STR_SETTINGS_FIRMWARE, LV_SYMBOL_DOWNLOAD },
+#endif
+#if UI_SETTINGS_SHOW_LOG
+        { UI_STR_SETTINGS_LOG, LV_SYMBOL_FILE },
+#endif
+#if UI_SETTINGS_SHOW_SECURITY
+        { UI_STR_SETTINGS_SECURITY, LV_SYMBOL_EYE_CLOSE },
+#endif
+#if UI_SETTINGS_SHOW_BT
+        { UI_STR_SETTINGS_BT, LV_SYMBOL_BLUETOOTH },
+#endif
+#if UI_SETTINGS_SHOW_WIFI
+        { UI_STR_SETTINGS_WIFI, LV_SYMBOL_WIFI },
+#endif
+#if UI_SETTINGS_SHOW_USB
+        { UI_STR_SETTINGS_USB, LV_SYMBOL_USB },
+#endif
+#if UI_SETTINGS_SHOW_EXPORT
+        { UI_STR_SETTINGS_EXPORT, LV_SYMBOL_UPLOAD },
+#endif
+#if UI_SETTINGS_SHOW_DEVICE
+        { UI_STR_SETTINGS_DEVICE, LV_SYMBOL_DRIVE },
+#endif
+#if UI_SETTINGS_SHOW_FACTORY
+        { UI_STR_SETTINGS_FACTORY, LV_SYMBOL_TRASH },
+#endif
     };
-    /** 与 `set_item_ids` 一一对应；符号定义见 `lvgl/src/font/lv_symbol_def.h` */
-    static const char *const set_item_syms[] = {
-        LV_SYMBOL_LOOP,
-        LV_SYMBOL_POWER,
-        LV_SYMBOL_BATTERY_FULL,
-        LV_SYMBOL_WARNING,
-        LV_SYMBOL_SD_CARD,
-        LV_SYMBOL_DOWNLOAD,
-        LV_SYMBOL_FILE,
-        LV_SYMBOL_EYE_CLOSE,
-        LV_SYMBOL_BLUETOOTH,
-        LV_SYMBOL_WIFI,
-        LV_SYMBOL_USB,
-        LV_SYMBOL_UPLOAD,
-        LV_SYMBOL_DRIVE,
-        LV_SYMBOL_TRASH,
-    };
-    LV_ASSERT((sizeof(set_item_ids) / sizeof(set_item_ids[0])) == (sizeof(set_item_syms) / sizeof(set_item_syms[0])));
 
-    for(unsigned j = 0; j < (unsigned)(sizeof(set_item_ids) / sizeof(set_item_ids[0])); j++) {
+    for(unsigned j = 0; j < (unsigned)(sizeof(s_cc_settings_rows) / sizeof(s_cc_settings_rows[0])); j++) {
+        const ui_str_id_t sid = s_cc_settings_rows[j].id;
+        const char *sym = s_cc_settings_rows[j].sym;
         lv_obj_t *row = lv_obj_create(set_list);
         lv_obj_set_width(row, LV_PCT(100));
-        lv_obj_set_height(row, 48);
-        lv_obj_set_style_bg_color(row, lv_color_hex(UI_ZONE_CYAN), 0);
-        lv_obj_set_style_radius(row, 8, 0);
-        lv_obj_set_style_border_width(row, 0, 0);
-        lv_obj_set_style_pad_left(row, 8, 0);
-        lv_obj_set_style_pad_right(row, 10, 0);
-        lv_obj_set_style_pad_column(row, 8, 0);
-        lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+        ui_style_cc_settings_row_apply(row);
         lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_remove_flag(row, LV_OBJ_FLAG_EVENT_BUBBLE);
-        lv_obj_add_event_cb(row, cc_settings_item_clicked_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)set_item_ids[j]);
-        cc_lang_ctrl_apply_focus_visual(row);
+        lv_obj_add_event_cb(row, cc_settings_item_clicked_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)sid);
+        ui_style_cc_interactive_focus(row);
         lv_obj_set_layout(row, LV_LAYOUT_FLEX);
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
         lv_obj_t *ic = lv_label_create(row);
-        lv_label_set_text_static(ic, set_item_syms[j]);
+        lv_label_set_text_static(ic, sym);
         lv_label_set_long_mode(ic, LV_LABEL_LONG_CLIP);
         lv_obj_set_style_text_font(ic, &lv_font_montserrat_20, 0);
         lv_obj_set_style_text_color(ic, lv_color_hex(0x333333), 0);
@@ -1911,15 +1712,11 @@ static void main_create_control_center(lv_obj_t *scr)
         lv_obj_set_width(ic, 26);
 
         lv_obj_t *rl = lv_label_create(row);
-        ui_i18n_bind_label(rl, set_item_ids[j]);
+        ui_i18n_bind_label(rl, sid);
         lv_label_set_long_mode(rl, LV_LABEL_LONG_CLIP);
         ui_style_zone_label(rl);
         lv_obj_set_flex_grow(rl, 1);
     }
-
-#if UI_FEATURE_DISPLAY_ROTATION
-    main_cc_create_rotation_panel(cc_body);
-#endif
 
     cc_sync_settings_list_geom();
 
@@ -1930,74 +1727,26 @@ static void main_create_control_center(lv_obj_t *scr)
     s_cc_open = false;
 }
 
-/**
- * 在 `s_mode_strip` 上追加一页（透明 page + 卡片 + 可点图标 + i18n 名称），并写入 `s_mode_pages` / `s_mode_cards` / `s_mode_strip_mode_at[phys_idx]`。
- * @param phys_idx 物理槽索引，须小于 `UI_MODE_STRIP_PHYS_MAX`。
- */
-static void main_mode_strip_build_page(ui_shoot_mode_t m, uint32_t phys_idx, lv_coord_t card_w, lv_coord_t page_w)
-{
-    if(phys_idx >= UI_MODE_STRIP_PHYS_MAX) {
-        return;
-    }
-    s_mode_strip_mode_at[phys_idx] = m;
-
-    lv_obj_t *page = lv_obj_create(s_mode_strip);
-    s_mode_pages[phys_idx] = page;
-    lv_obj_set_size(page, page_w, 200);
-    lv_obj_set_style_bg_opa(page, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(page, 0, 0);
-    lv_obj_remove_flag(page, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLL_ELASTIC |
-                                LV_OBJ_FLAG_SCROLL_MOMENTUM);
-    lv_obj_set_layout(page, LV_LAYOUT_FLEX);
-    lv_obj_set_flex_flow(page, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(page, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-    lv_obj_t *card = lv_obj_create(page);
-    s_mode_cards[phys_idx] = card;
-    lv_obj_set_size(card, card_w, 200);
-    lv_obj_set_style_radius(card, 12, 0);
-    lv_obj_set_style_pad_all(card, 10, 0);
-    lv_obj_set_style_border_width(card, 0, 0);
-    lv_obj_set_layout(card, LV_LAYOUT_FLEX);
-    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(card, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_remove_flag(card, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ELASTIC |
-                             LV_OBJ_FLAG_SCROLL_MOMENTUM);
-
-    lv_obj_t *ic = lv_label_create(card);
-    lv_label_set_text_static(ic, ui_app_shoot_mode_icon_glyph(m));
-    lv_label_set_long_mode(ic, LV_LABEL_LONG_CLIP);
-    lv_obj_set_style_text_font(ic, &lv_font_montserrat_40, 0);
-    lv_obj_set_style_text_color(ic, lv_color_hex(0x2a6ae9), 0);
-    lv_obj_set_style_text_align(ic, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_remove_flag(ic, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM);
-    lv_obj_add_flag(ic, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_ext_click_area(ic, 10);
-    lv_obj_add_event_cb(ic, mode_icon_clicked_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)phys_idx);
-
-    lv_obj_t *nm = lv_label_create(card);
-    ui_i18n_bind_label(nm, ui_i18n_shoot_mode_label_id(m));
-    ui_style_zone_label(nm);
-    lv_label_set_long_mode(nm, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(nm, card_w - 20);
-    lv_obj_set_style_text_align(nm, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_remove_flag(nm, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM);
-}
-
 /** 全屏拍摄模式页：标题栏下滑关闭、横向滚动选模式、卡片图标与 i18n 名称。 */
 static void main_create_mode_panel(lv_obj_t *scr)
 {
-    for(uint32_t mi = 0; mi < UI_MODE_STRIP_PHYS_MAX; mi++) {
-        s_mode_pages[mi] = NULL;
-        s_mode_cards[mi] = NULL;
-    }
-    s_mode_strip_slot_n = 0u;
-    s_mode_strip_real_n = 0u;
     s_mode_strip = NULL;
+
+    s_mode_dim = lv_obj_create(scr);
+    lv_obj_set_size(s_mode_dim, MY_SCREEN_WIDTH, MY_SCREEN_HEIGHT);
+    lv_obj_set_pos(s_mode_dim, 0, 0);
+    lv_obj_set_style_bg_color(s_mode_dim, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_mode_dim, LV_OPA_50, 0);
+    lv_obj_set_style_border_width(s_mode_dim, 0, 0);
+    lv_obj_remove_flag(s_mode_dim, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_mode_dim, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(s_mode_dim, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(s_mode_dim, mode_dim_clicked_cb, LV_EVENT_CLICKED, NULL);
 
     s_mode = lv_obj_create(scr);
     lv_obj_set_size(s_mode, MY_SCREEN_WIDTH, MY_SCREEN_HEIGHT);
-    lv_obj_set_pos(s_mode, 0, 0);
+    lv_obj_set_pos(s_mode, 0, MY_SCREEN_HEIGHT);
+    lv_obj_set_style_translate_y(s_mode, 0, LV_PART_MAIN);
     lv_obj_set_style_bg_color(s_mode, lv_color_white(), 0);
     lv_obj_set_style_border_width(s_mode, 0, 0);
     lv_obj_remove_flag(s_mode, LV_OBJ_FLAG_SCROLLABLE);
@@ -2034,7 +1783,7 @@ static void main_create_mode_panel(lv_obj_t *scr)
 
     lv_obj_t *close_btn = lv_obj_create(hdr);
     lv_obj_set_size(close_btn, 64, 36);
-    lv_obj_set_style_bg_color(close_btn, lv_color_hex(0xDDDDDD), 0);
+    lv_obj_set_style_bg_color(close_btn, lv_color_hex(UI_THEME_CC_BACK_BTN_BG), 0);
     lv_obj_set_style_border_width(close_btn, 0, 0);
     lv_obj_remove_flag(close_btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(close_btn, LV_OBJ_FLAG_CLICKABLE);
@@ -2053,26 +1802,12 @@ static void main_create_mode_panel(lv_obj_t *scr)
     lv_obj_set_width(body, MY_SCREEN_WIDTH - 16);
     lv_obj_remove_flag(body, LV_OBJ_FLAG_CLICKABLE);
 
-    s_mode_strip = lv_obj_create(s_mode);
-    lv_obj_set_width(s_mode_strip, MY_SCREEN_WIDTH);
-    lv_obj_set_flex_grow(s_mode_strip, 1);
-    lv_obj_set_style_min_height(s_mode_strip, 160, 0);
-    lv_obj_set_style_bg_opa(s_mode_strip, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(s_mode_strip, 0, 0);
-    lv_obj_set_style_pad_ver(s_mode_strip, 12, 0);
-    lv_obj_set_style_pad_column(s_mode_strip, (lv_coord_t)UI_MODE_STRIP_GAP, 0);
-    lv_obj_set_style_pad_hor(s_mode_strip, 0, 0);
     const lv_coord_t card_w = (lv_coord_t)UI_MODE_CARD_W;
     const lv_coord_t page_w = (lv_coord_t)UI_MODE_STRIP_PAGE_W;
-    lv_obj_set_scroll_dir(s_mode_strip, LV_DIR_HOR);
-    lv_obj_set_scrollbar_mode(s_mode_strip, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_set_scroll_snap_x(s_mode_strip, LV_SCROLL_SNAP_CENTER);
-    lv_obj_add_flag(s_mode_strip, LV_OBJ_FLAG_SCROLL_ONE);
-    lv_obj_add_event_cb(s_mode_strip, mode_strip_scroll_end_cb, LV_EVENT_SCROLL_END, NULL);
 
-    lv_obj_set_layout(s_mode_strip, LV_LAYOUT_FLEX);
-    lv_obj_set_flex_flow(s_mode_strip, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(s_mode_strip, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    s_mode_strip = ui_mode_carousel_create(s_mode, MY_SCREEN_WIDTH);
+    ui_mode_carousel_set_callbacks(s_mode_strip, mode_carousel_on_visual_scroll, mode_carousel_on_mode_committed, NULL);
+    ui_mode_carousel_configure_strip(s_mode_strip, card_w, page_w, (lv_coord_t)UI_MODE_STRIP_GAP);
 
     ui_shoot_mode_t modes_list[UI_SHOOT_MODE_COUNT];
     uint32_t n = 0u;
@@ -2084,20 +1819,16 @@ static void main_create_mode_panel(lv_obj_t *scr)
             modes_list[n++] = m;
         }
     }
-    s_mode_strip_real_n = n;
 
-    uint32_t phys = 0u;
-    if(n >= 2u) {
-        main_mode_strip_build_page(modes_list[n - 1u], phys++, card_w, page_w);
-        for(uint32_t i = 0; i < n; i++) {
-            main_mode_strip_build_page(modes_list[i], phys++, card_w, page_w);
-        }
-        main_mode_strip_build_page(modes_list[0], phys++, card_w, page_w);
+    if(!s_mode_card_tr_inited) {
+        static const lv_style_prop_t mode_card_tr_props[] = { LV_STYLE_BORDER_WIDTH, LV_STYLE_BORDER_COLOR,
+                                                              LV_STYLE_BG_COLOR, LV_STYLE_PROP_INV };
+        lv_style_transition_dsc_init(&s_mode_card_tr, mode_card_tr_props, lv_anim_path_ease_out,
+                                     UI_MODE_CARD_SELECT_TRANSITION_MS, 0, NULL);
+        s_mode_card_tr_inited = true;
     }
-    else if(n == 1u) {
-        main_mode_strip_build_page(modes_list[0], phys++, card_w, page_w);
-    }
-    s_mode_strip_slot_n = phys;
+
+    ui_mode_carousel_build(s_mode_strip, modes_list, n, n >= 2u, &s_mode_card_tr, mode_icon_clicked_cb);
 
     ui_app_shoot_mode_ensure_enabled();
     main_mode_update_card_selection();
@@ -2199,42 +1930,41 @@ static void main_scr_build_preview_decor(lv_obj_t *scr, lv_coord_t mid_h)
 /** 构建相机主界面：顶栏、三列中栏、底栏、控制中心、模式层与预览手势。 */
 void ui_page_main_create(lv_obj_t *scr)
 {
+    ui_page_main_scr_detach_gestures(scr);
+    ui_bt_nav_on_main_shown();
+    /* 蓝牙页等对 `scr` 设过 FLEX + pad_row；不清则主页子控件仍走 Flex，与下方 align 冲突，跟手滑动易失效 */
+    lv_obj_set_layout(scr, LV_LAYOUT_NONE);
+    lv_obj_set_style_pad_row(scr, 0, 0);
+    lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
     ui_i18n_reset_bindings();
     ui_indev_apply_pointer_profile();
-
-#if UI_FEATURE_DISPLAY_ROTATION
-    ui_display_apply_rotation(LV_DISPLAY_ROTATION_0);
-#endif
+    ui_app_state_boot_load();
+    ui_boot_debug_log_params();
 
     s_isp = NULL;
     s_cc_dim = NULL;
     s_cc_sheet = NULL;
+    s_mode_dim = NULL;
     s_mode = NULL;
     s_mode_strip = NULL;
-    for(uint32_t mi = 0; mi < UI_MODE_STRIP_PHYS_MAX; mi++) {
-        s_mode_pages[mi] = NULL;
-        s_mode_cards[mi] = NULL;
-    }
-    s_mode_strip_slot_n = 0u;
-    s_mode_strip_real_n = 0u;
+    s_bottom_mode_icon_l = NULL;
+    s_bottom_mode_name_l = NULL;
+    s_status_bar = NULL;
     s_status_storage_l = NULL;
     s_status_mode_ic = NULL;
     s_status_bat_l = NULL;
     s_chrome_bt_l = NULL;
     s_cc_lang_dd = NULL;
     s_cc_grid = NULL;
+    s_cc_quick_tile_l = NULL;
     s_cc_settings = NULL;
     s_cc_set_list = NULL;
-#if UI_FEATURE_DISPLAY_ROTATION
     s_cc_rotation_panel = NULL;
     s_cc_rot_switch = NULL;
     s_cc_rot_angle_list = NULL;
     for(unsigned ri = 0; ri < 4; ri++) {
         s_cc_rot_angle_btns[ri] = NULL;
     }
-    s_cc_rot_enabled = false;
-    s_cc_rot_sel_idx = 0;
-#endif
     s_isp_open = false;
     s_cc_open = false;
     s_mode_open = false;
@@ -2243,15 +1973,15 @@ void ui_page_main_create(lv_obj_t *scr)
     s_vp_cc_drag = false;
     s_vp_mode_preview = false;
     s_vp_isp_preview = false;
-    s_vp_replay_peek = NULL;
     s_vp_decor_layer = NULL;
 
-    lv_obj_set_style_bg_color(scr, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(scr, lv_color_hex(UI_THEME_SCREEN_BG), 0);
     lv_obj_set_style_pad_all(scr, 0, 0);
 
     const int mid_h = MY_SCREEN_HEIGHT - UI_TOP_BAR_H - UI_BOTTOM_BAR_H;
 
     lv_obj_t *status = lv_obj_create(scr);
+    s_status_bar = status;
     lv_obj_add_flag(status, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_set_size(status, MY_SCREEN_WIDTH, UI_TOP_BAR_H);
     lv_obj_align(status, LV_ALIGN_TOP_MID, 0, 0);
@@ -2260,7 +1990,7 @@ void ui_page_main_create(lv_obj_t *scr)
     lv_obj_set_style_pad_hor(status, 8, 0);
     lv_obj_set_style_pad_ver(status, 4, 0);
     lv_obj_remove_flag(status, LV_OBJ_FLAG_SCROLLABLE);
-    ui_region_strip_enable_scroll(status);
+    /* 顶栏不启用 `ui_region_strip_enable_scroll`：避免纵向可滚与全屏手势抢事件、顶栏「跟着滑」 */
     lv_obj_set_layout(status, LV_LAYOUT_FLEX);
     lv_obj_set_flex_flow(status, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(status, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -2295,12 +2025,15 @@ void ui_page_main_create(lv_obj_t *scr)
     lv_obj_set_flex_flow(st_right, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(st_right, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_add_flag(st_right, LV_OBJ_FLAG_EVENT_BUBBLE);
+    /* 占满状态栏除左侧外的宽度，避免蓝牙词条与多图标被固定 100px 裁切 */
+    lv_obj_set_flex_grow(st_right, 1);
+    lv_obj_set_style_min_width(st_right, UI_STATUS_BAR_RIGHT_MIN_W, 0);
 
     s_chrome_bt_l = lv_label_create(st_right);
     ui_i18n_bind_label(s_chrome_bt_l, UI_STR_BT_STATUS_ON);
     ui_style_zone_label(s_chrome_bt_l);
     lv_label_set_long_mode(s_chrome_bt_l, LV_LABEL_LONG_CLIP);
-    lv_obj_set_width(s_chrome_bt_l, 100);
+    lv_obj_set_width(s_chrome_bt_l, LV_SIZE_CONTENT);
     lv_obj_set_style_text_align(s_chrome_bt_l, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
     lv_obj_remove_flag(s_chrome_bt_l, LV_OBJ_FLAG_CLICKABLE);
     if(!ui_bt_is_enabled()) {
@@ -2309,11 +2042,13 @@ void ui_page_main_create(lv_obj_t *scr)
 
     s_status_mode_ic = lv_label_create(st_right);
     lv_label_set_long_mode(s_status_mode_ic, LV_LABEL_LONG_CLIP);
+    lv_obj_set_width(s_status_mode_ic, LV_SIZE_CONTENT);
     lv_obj_set_style_text_font(s_status_mode_ic, &lv_font_montserrat_20, 0);
     lv_obj_remove_flag(s_status_mode_ic, LV_OBJ_FLAG_CLICKABLE);
 
     s_status_bat_l = lv_label_create(st_right);
     lv_label_set_long_mode(s_status_bat_l, LV_LABEL_LONG_CLIP);
+    lv_obj_set_width(s_status_bat_l, LV_SIZE_CONTENT);
     ui_style_zone_label(s_status_bat_l);
     lv_obj_remove_flag(s_status_bat_l, LV_OBJ_FLAG_CLICKABLE);
 
@@ -2404,18 +2139,32 @@ void ui_page_main_create(lv_obj_t *scr)
         lv_obj_set_style_pad_ver(cell, 4, 0);
         lv_obj_remove_flag(cell, LV_OBJ_FLAG_SCROLLABLE);
         ui_region_strip_enable_scroll(cell);
-        lv_obj_t *cell_l = lv_label_create(cell);
-        ui_i18n_bind_label(cell_l, bottom_ids[i]);
-        ui_label_i18n_wrap(cell_l, MY_SCREEN_WIDTH / 3 - 20);
-        lv_obj_align(cell_l, LV_ALIGN_TOP_MID, 0, 0);
-        lv_obj_set_style_text_align(cell_l, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
         if(i == 0u) {
-            lv_obj_add_event_cb(cell, main_bottom_mode_cell_cb, LV_EVENT_CLICKED, NULL);
+            lv_obj_set_layout(cell, LV_LAYOUT_FLEX);
+            lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_set_style_pad_column(cell, 8, 0);
+            lv_obj_remove_flag(cell, LV_OBJ_FLAG_CLICKABLE);
+            s_bottom_mode_icon_l = lv_label_create(cell);
+            lv_label_set_long_mode(s_bottom_mode_icon_l, LV_LABEL_LONG_CLIP);
+            lv_obj_set_style_text_font(s_bottom_mode_icon_l, &lv_font_montserrat_20, 0);
+            lv_obj_remove_flag(s_bottom_mode_icon_l, LV_OBJ_FLAG_CLICKABLE);
+            s_bottom_mode_name_l = lv_label_create(cell);
+            lv_label_set_long_mode(s_bottom_mode_name_l, LV_LABEL_LONG_WRAP);
+            ui_label_i18n_wrap(s_bottom_mode_name_l, MY_SCREEN_WIDTH / 3 - 48);
+            lv_obj_set_style_text_align(s_bottom_mode_name_l, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
+            lv_obj_remove_flag(s_bottom_mode_name_l, LV_OBJ_FLAG_CLICKABLE);
         }
         else {
+            lv_obj_t *cell_l = lv_label_create(cell);
+            ui_i18n_bind_label(cell_l, bottom_ids[i]);
+            ui_label_i18n_wrap(cell_l, MY_SCREEN_WIDTH / 3 - 20);
+            lv_obj_align(cell_l, LV_ALIGN_TOP_MID, 0, 0);
+            lv_obj_set_style_text_align(cell_l, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
             lv_obj_add_event_cb(cell, ui_evt_zone_click_cb, LV_EVENT_CLICKED, (void *)bottom_dbg[i]);
         }
     }
+    main_refresh_bottom_mode_cell();
 
     main_scr_build_preview_decor(scr, mid_h);
     lv_obj_move_foreground(s_vp_decor_layer);
@@ -2427,6 +2176,12 @@ void ui_page_main_create(lv_obj_t *scr)
     lv_obj_add_event_cb(scr, main_viewport_gesture_cb, LV_EVENT_PRESSING, scr);
     lv_obj_add_event_cb(scr, main_viewport_gesture_cb, LV_EVENT_RELEASED, scr);
     lv_obj_add_event_cb(scr, main_viewport_gesture_cb, LV_EVENT_PRESS_LOST, scr);
+
+    lv_indev_reset(NULL, NULL);
+
+    ui_cc_settings_apply_rotation_to_hw();
+
+    ui_app_shoot_mode_observer_register(main_shoot_mode_observer_cb, NULL);
 }
 
 /** 刷新顶栏存储/模式/电量/蓝牙等；仅主屏控件仍有效时安全调用。 */

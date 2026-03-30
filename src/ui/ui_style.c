@@ -6,6 +6,69 @@
 #include "ui_common.h"
 #include "ui_font.h"
 
+static const lv_style_prop_t s_cc_hit_tr_props[] = {
+    LV_STYLE_TRANSFORM_SCALE_X,
+    LV_STYLE_TRANSFORM_SCALE_Y,
+    LV_STYLE_OUTLINE_WIDTH,
+    LV_STYLE_OUTLINE_OPA,
+    LV_STYLE_PROP_INV,
+};
+
+static lv_style_transition_dsc_t s_cc_hit_tr;
+static bool s_cc_hit_tr_inited;
+
+static void ui_style_cc_hit_install_transition(lv_obj_t *ctrl)
+{
+    if(!s_cc_hit_tr_inited) {
+        lv_style_transition_dsc_init(&s_cc_hit_tr, s_cc_hit_tr_props, lv_anim_path_ease_out, 120, 0, NULL);
+        s_cc_hit_tr_inited = true;
+    }
+    lv_obj_set_style_transition(ctrl, &s_cc_hit_tr, LV_PART_MAIN);
+}
+
+void ui_style_cc_settings_row_apply(lv_obj_t *row)
+{
+    lv_obj_set_height(row, 48);
+    lv_obj_set_style_bg_color(row, lv_color_hex(UI_CC_SETTINGS_ROW_BG), 0);
+    lv_obj_set_style_bg_opa(row, UI_CC_SETTINGS_ROW_BG_OPA, 0);
+    lv_obj_set_style_border_color(row, lv_color_hex(UI_CC_SETTINGS_ROW_BORDER), 0);
+    lv_obj_set_style_border_width(row, UI_CC_SETTINGS_ROW_BORDER_W, 0);
+    lv_obj_set_style_radius(row, 8, 0);
+    lv_obj_set_style_pad_left(row, 8, 0);
+    lv_obj_set_style_pad_right(row, 10, 0);
+    lv_obj_set_style_pad_column(row, 8, 0);
+    lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+void ui_style_cc_interactive_focus(lv_obj_t *ctrl)
+{
+    lv_obj_set_style_transform_pivot_x(ctrl, lv_pct(50), LV_PART_MAIN);
+    lv_obj_set_style_transform_pivot_y(ctrl, lv_pct(50), LV_PART_MAIN);
+    lv_obj_set_style_transform_scale_x(ctrl, LV_SCALE_NONE, LV_PART_MAIN);
+    lv_obj_set_style_transform_scale_y(ctrl, LV_SCALE_NONE, LV_PART_MAIN);
+    lv_obj_set_style_transform_scale_x(ctrl, 280, LV_PART_MAIN | LV_STATE_HOVERED);
+    lv_obj_set_style_transform_scale_y(ctrl, 280, LV_PART_MAIN | LV_STATE_HOVERED);
+    lv_obj_set_style_transform_scale_x(ctrl, 280, LV_PART_MAIN | LV_STATE_FOCUSED);
+    lv_obj_set_style_transform_scale_y(ctrl, 280, LV_PART_MAIN | LV_STATE_FOCUSED);
+    lv_obj_set_style_transform_scale_x(ctrl, 280, LV_PART_MAIN | LV_STATE_CHECKED);
+    lv_obj_set_style_transform_scale_y(ctrl, 280, LV_PART_MAIN | LV_STATE_CHECKED);
+    lv_obj_set_style_outline_width(ctrl, 0, LV_PART_MAIN);
+    lv_obj_set_style_outline_opa(ctrl, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_outline_width(ctrl, 2, LV_PART_MAIN | LV_STATE_HOVERED);
+    lv_obj_set_style_outline_opa(ctrl, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_HOVERED);
+    lv_obj_set_style_outline_color(ctrl, lv_palette_main(LV_PALETTE_BLUE), LV_PART_MAIN | LV_STATE_HOVERED);
+    lv_obj_set_style_outline_pad(ctrl, 2, LV_PART_MAIN | LV_STATE_HOVERED);
+    lv_obj_set_style_outline_width(ctrl, 2, LV_PART_MAIN | LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_opa(ctrl, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_color(ctrl, lv_palette_main(LV_PALETTE_BLUE), LV_PART_MAIN | LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_pad(ctrl, 2, LV_PART_MAIN | LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_width(ctrl, 2, LV_PART_MAIN | LV_STATE_CHECKED);
+    lv_obj_set_style_outline_opa(ctrl, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_CHECKED);
+    lv_obj_set_style_outline_color(ctrl, lv_palette_main(LV_PALETTE_BLUE), LV_PART_MAIN | LV_STATE_CHECKED);
+    lv_obj_set_style_outline_pad(ctrl, 2, LV_PART_MAIN | LV_STATE_CHECKED);
+    ui_style_cc_hit_install_transition(ctrl);
+}
+
 /** 区域说明类 Label：中文用 `ui_font_cjk()`，黑色正文。 */
 void ui_style_zone_label(lv_obj_t *label)
 {

@@ -4,6 +4,8 @@
  */
 #include "ui_i18n.h"
 
+#include "ui_sim_settings_persist.h"
+
 #define UI_I18N_MAX_BINDINGS 128
 
 typedef struct {
@@ -28,15 +30,22 @@ static const char *const s_zh[UI_STR_COUNT] = {
     [UI_STR_BOTTOM_VIEW_CTRL] = "视图控制",
     [UI_STR_REPLAY_TITLE] = "回放页面",
     [UI_STR_REPLAY_BODY] = "回放(占位)\n左滑返回主页(向左拖动)",
+    [UI_STR_REPLAY_ALBUM_PAUSED] = "相册-最近拍摄-暂停状态",
+    [UI_STR_REPLAY_ALBUM_PLAYING] = "相册-最近拍摄-播放",
+    [UI_STR_REPLAY_DURATION] = "时长",
+    [UI_STR_REPLAY_DELETE] = "删除",
+    [UI_STR_REPLAY_UPLOAD] = "上传",
+    [UI_STR_REPLAY_PLAY] = "播放",
+    [UI_STR_REPLAY_PROGRESS] = "播放进度",
     [UI_STR_CC_TITLE] = "控制中心",
     [UI_STR_CC_LANG_LABEL] = "语言",
     [UI_STR_CC_TILE_ROTATION] = "旋转方向锁定/开启",
     [UI_STR_CC_ROT_TITLE] = "旋转方向",
     [UI_STR_CC_ROT_ENABLE] = "启用屏幕旋转",
-    [UI_STR_CC_ROT_ANGLE_0] = "0°（360°）",
-    [UI_STR_CC_ROT_ANGLE_90] = "90°",
-    [UI_STR_CC_ROT_ANGLE_180] = "180°",
-    [UI_STR_CC_ROT_ANGLE_270] = "270°",
+    [UI_STR_CC_ROT_ANGLE_0] = "0度 / 360度",
+    [UI_STR_CC_ROT_ANGLE_90] = "90度",
+    [UI_STR_CC_ROT_ANGLE_180] = "180度",
+    [UI_STR_CC_ROT_ANGLE_270] = "270度",
     [UI_STR_CC_TILE_LOCK_SCREEN] = "锁定屏幕",
     [UI_STR_CC_TILE_VOICE] = "语音控制",
     [UI_STR_CC_TILE_SYSTEM] = "系统设置",
@@ -69,14 +78,14 @@ static const char *const s_zh[UI_STR_COUNT] = {
     [UI_STR_BT_STATUS_ON] = "蓝牙已开启",
     [UI_STR_MODE_TITLE] = "拍摄模式",
     [UI_STR_MODE_BODY] =
-        "左右滑动切换模式\n多项模式时首尾相连可循环滑动\n点击屏幕侧边模式会先滚到中央再显示选中\n点击中央模式图标确认并返回主页\n下滑标题栏或点关闭不改动模式",
+        "左右滑动可浏览各模式卡片即预览下一项或多项\n轻划停住为就近一格\n快甩后靠惯性可滑过多个模式\n停稳吸附后写入当前模式 多项时可循环切换\n点侧边模式先滚到中央再选中 点中央图标确认回主页\n下滑标题或关钮不改模式",
     [UI_STR_BOOT_WELCOME_FMT] = "欢迎使用%s",
     [UI_STR_BOOT_VERSION_FMT] = "当前版本%s",
     [UI_STR_BOOT_STARTING] = "正在启动...",
     [UI_STR_SHOOT_MODE_3DGS] = "3DGS",
     [UI_STR_SHOOT_MODE_VIDEO] = "录像",
     [UI_STR_SHOOT_MODE_PHOTO] = "拍照",
-    [UI_STR_SHOOT_MODE_AI_DIRECTOR] = "智能跟拍（AI Director）",
+    [UI_STR_SHOOT_MODE_AI_DIRECTOR] = "智能跟拍 AI Director",
     [UI_STR_SHOOT_MODE_3DGS_VIDEO] = "3DGS+录像",
     [UI_STR_SHOOT_MODE_FREE_RATIO_VIDEO] = "自由比例录像",
     [UI_STR_SHOOT_MODE_DUAL_LENS_VIDEO] = "双镜头录像",
@@ -100,15 +109,22 @@ static const char *const s_en[UI_STR_COUNT] = {
     [UI_STR_BOTTOM_VIEW_CTRL] = "View control",
     [UI_STR_REPLAY_TITLE] = "Replay",
     [UI_STR_REPLAY_BODY] = "Replay (placeholder)\nSwipe left to home",
+    [UI_STR_REPLAY_ALBUM_PAUSED] = "Album - Recent - Paused",
+    [UI_STR_REPLAY_ALBUM_PLAYING] = "Album - Recent - Playing",
+    [UI_STR_REPLAY_DURATION] = "Duration",
+    [UI_STR_REPLAY_DELETE] = "Delete",
+    [UI_STR_REPLAY_UPLOAD] = "Upload",
+    [UI_STR_REPLAY_PLAY] = "Play",
+    [UI_STR_REPLAY_PROGRESS] = "Playback progress",
     [UI_STR_CC_TITLE] = "Control Center",
     [UI_STR_CC_LANG_LABEL] = "Language",
     [UI_STR_CC_TILE_ROTATION] = "Rotation lock",
     [UI_STR_CC_ROT_TITLE] = "Display rotation",
     [UI_STR_CC_ROT_ENABLE] = "Enable display rotation",
-    [UI_STR_CC_ROT_ANGLE_0] = "0° (360°)",
-    [UI_STR_CC_ROT_ANGLE_90] = "90°",
-    [UI_STR_CC_ROT_ANGLE_180] = "180°",
-    [UI_STR_CC_ROT_ANGLE_270] = "270°",
+    [UI_STR_CC_ROT_ANGLE_0] = "0 / 360 deg",
+    [UI_STR_CC_ROT_ANGLE_90] = "90 deg",
+    [UI_STR_CC_ROT_ANGLE_180] = "180 deg",
+    [UI_STR_CC_ROT_ANGLE_270] = "270 deg",
     [UI_STR_CC_TILE_LOCK_SCREEN] = "Lock screen",
     [UI_STR_CC_TILE_VOICE] = "Voice control",
     [UI_STR_CC_TILE_SYSTEM] = "System settings",
@@ -140,11 +156,12 @@ static const char *const s_en[UI_STR_COUNT] = {
     [UI_STR_BT_WIFI_SET] = "WiFi SSID / set Wi-Fi password",
     [UI_STR_BT_STATUS_ON] = "Bluetooth on",
     [UI_STR_MODE_TITLE] = "Shooting mode",
-    [UI_STR_MODE_BODY] = "Swipe to change mode\n"
-                          "With multiple modes the strip loops end to end\n"
-                          "Tap a side mode to scroll it to the center first, then it shows as selected\n"
-                          "Tap the centered mode icon to apply and return home\n"
-                          "Swipe down on the title bar or tap close without changing mode",
+    [UI_STR_MODE_BODY] = "Swipe horizontally to browse mode cards and preview the next one or several\n"
+                          "A short drag settles on the nearest snap\n"
+                          "A fast flick glides on inertia across multiple modes\n"
+                          "When scrolling stops the centered mode is saved  multiple modes can loop\n"
+                          "Tap a side card to scroll it to center first  tap the centered icon to apply and go home\n"
+                          "Swipe down on the title or tap close to leave without changing mode",
     [UI_STR_BOOT_WELCOME_FMT] = "Welcome to Camera %s",
     [UI_STR_BOOT_VERSION_FMT] = "Current version %s",
     [UI_STR_BOOT_STARTING] = "Starting...",
@@ -193,12 +210,24 @@ const char *ui_i18n_str(ui_str_id_t id)
 }
 
 /** 设置当前语种；非法值则忽略。 */
-void ui_i18n_set_lang(ui_lang_t lang)
+void ui_i18n_set_lang_without_persist(ui_lang_t lang)
 {
     if(lang != UI_LANG_ZH && lang != UI_LANG_EN) {
         return;
     }
     s_lang = lang;
+}
+
+void ui_i18n_set_lang(ui_lang_t lang)
+{
+    if(lang != UI_LANG_ZH && lang != UI_LANG_EN) {
+        return;
+    }
+    if(s_lang == lang) {
+        return;
+    }
+    s_lang = lang;
+    ui_sim_settings_persist_save();
 }
 
 /** 返回当前语种。 */

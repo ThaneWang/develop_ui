@@ -5,6 +5,7 @@
 #include "ui.h"
 #include "../logging.h"
 #include "ui_boot.h"
+#include "ui_sim_settings_persist.h"
 
 #if UI_DEVELOP
 
@@ -12,6 +13,7 @@
 void my_ui_init(void)
 {
     LOG_DEBUG("my_ui_init（UI_DEVELOP）");
+    ui_sim_settings_boot_load();
     ui_boot_show_then_main();
     LOG_DEBUG("交互布局 UI 已初始化（含开机动画入口）");
 }

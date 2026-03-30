@@ -8,7 +8,7 @@
 #include "lvgl/lvgl.h"
 
 #define MY_SCREEN_WIDTH   800
-#define MY_SCREEN_HEIGHT  600
+#define MY_SCREEN_HEIGHT  480
 
 #define UI_DEVELOP 1
 

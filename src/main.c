@@ -3,8 +3,8 @@
  * @brief PC 模拟器入口：SDL → LVGL → HAL → 自定义 UI 主循环。
  *
  * 与 UI 的依赖关系（调用顺序不可颠倒）：
- * 1. `lv_init()` → `ui_font_init()`（静态 Noto SC 16）→ HAL → `my_ui_init()`。
- * 2. `#include "ui/ui.h"`：声明 `my_ui_init()`，并提供分辨率宏给 HAL。
+ * 1. `lv_init()` → `ui_font_init()`（静态 Noto SC 16）→ HAL → `my_ui_init()`（内先 **`ui_sim_settings_boot_load()`** 再开机动画/主页）。
+ * 2. `#include "ui/ui.h"`：声明 `my_ui_init()`，并提供分辨率宏（**800×480**）给 HAL。
  * 3. `#include "ui/ui_font.h"` + `ui_font_init()`：在 `lv_init()` 之后完成中文字体就绪。
  * 4. `#include "logging.h"`：与 UI 模块共用日志输出。
  * 5. 各 `src/ui/*.c` 由 CMake 链入 `main`；除 `ui/ui.h`、`ui/ui_font.h` 外不必包含其它 UI 内部头文件。

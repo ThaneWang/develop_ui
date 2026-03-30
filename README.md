@@ -1,5 +1,24 @@
 # VSCode Simulator project for LVGL
 
+## 中文：相机 LVGL 模拟器文档
+
+本仓库在 **上游 LVGL PC 模拟器** 基础上扩展了 **相机 UI 模拟器**（`src/ui/`）。产品固件大纲、阶段 Plan、模拟器实现状态与目标机预览架构等 **中文说明与目录索引** 见：
+
+**[`docs/README.md`](docs/README.md)**
+
+工程约定（主题/HAL、手势、字库等）见 **`.cursor/rules/rules.md`**。
+
+---
+
+## Contents
+
+- [Get started](#get-started)
+- [Usage](#usage)
+- [Run demos and examples](#run-demos-and-examples)
+- [Optional library](#optional-library)
+- [Test](#test)
+- [Integration with LVGL Pro](#integration-with-lvgl-pro)
+
 [LVGL](https://github.com/lvgl/lvgl) is written mainly for microcontrollers and embedded systems, however you can run the library **on your PC** as well without any embedded hardware. The code written on PC can be simply copied when your are using an embedded system.
 
 This project is pre-configured for VSCode and should work work on Windows, Linux and MacOs as well. FreeRTOS is also included and can be optionally enabled to better simulate embedded system's behavior. 

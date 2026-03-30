@@ -18,6 +18,11 @@ void ui_indev_apply_pointer_profile(void)
                 const uint8_t lim_u8 = (lim < 1) ? 1u : ((lim > 255) ? 255u : (uint8_t)lim);
                 lv_indev_set_scroll_limit(indev, lim_u8);
             }
+            {
+                const int st = UI_INDEV_SCROLL_THROW_PCT;
+                const uint8_t st_u8 = (st < 1) ? 1u : ((st > 99) ? 99u : (uint8_t)st);
+                lv_indev_set_scroll_throw(indev, st_u8);
+            }
         }
         indev = lv_indev_get_next(indev);
     }
