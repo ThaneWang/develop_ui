@@ -10,7 +10,7 @@
 #include "ui_i18n.h"
 #include "ui_bt_nav.h"
 #include "ui_style.h"
-#include "../logging.h"
+#include "../../logging.h"
 #include "lvgl/lvgl.h"
 
 static lv_obj_t *s_pair_spinner;

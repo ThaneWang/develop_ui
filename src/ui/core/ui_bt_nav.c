@@ -11,7 +11,7 @@
 #include "ui_app_state.h"
 #include "ui_hw_hal.h"
 #include "ui_i18n.h"
-#include "../logging.h"
+#include "../../logging.h"
 
 static bool s_on_bt_page;
 static bool s_open_inflight;

@@ -3,7 +3,7 @@
  * @brief UI 模块入口：实现 `my_ui_init()`，内部转调首个页面（当前为 `ui_page_main_create`）。
  */
 #include "ui.h"
-#include "../logging.h"
+#include "../../logging.h"
 #include "ui_boot.h"
 #include "ui_sim_settings_persist.h"
 

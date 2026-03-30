@@ -25,7 +25,7 @@
 
 ## 使用方式
 
-1. 在 **[任务 backlog](#任务-backlog)** 追加条目（**模块 + 期望行为 + 验收**）。**UI 相关须写文件路径**（如 `src/ui/ui_page_main.c`），与 **`docs/ui-simulator-status.md`**、**`project-plan.md`** §2 一致；规则见 **`.cursor/rules/rules.md`** §**1.3**。
+1. 在 **[任务 backlog](#任务-backlog)** 追加条目（**模块 + 期望行为 + 验收**）。**UI 相关须写文件路径**（如 `src/ui/pages/ui_page_main.c`），与 **`docs/ui-simulator-status.md`**、**`project-plan.md`** §2 一致；规则见 **`.cursor/rules/rules.md`** §**1.3**。
 2. 可注明 `(refs: docs/firmware-fw-v1-framework.md §x)` 等。
 3. 开工前可说「按 `dev-plan.md` 做下一项」。
 4. 完成后将条目标为 **[x]** 或移至 **[已完成](#已完成归档)**，并在 **`ui-simulator-status.md`** 对应小节 **追加一行**（若涉及界面行为）。

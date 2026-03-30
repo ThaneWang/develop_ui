@@ -31,7 +31,7 @@
 
 ### 回放
 
-- 暂停态底栏与主界面一致展示当前 `ui_app` 模式（`ui_page_replay_sync_shoot_mode_display`）；顶栏、上传/播放、播放态占位与进度条、`ui_replay_player_load_request` 占位；左滑回主页（`ui_page_replay.c`、`ui_nav`、`ui_i18n`）。
+- 暂停态底栏与主界面一致展示当前 `ui_app` 模式（`ui_page_replay_sync_shoot_mode_display`）；顶栏、上传/播放、播放态占位与进度条、`ui_replay_player_load_request` 占位；左滑回主页（`ui_page_replay.c`、`ui_nav`、`ui_i18n`）。**视觉**：与 **`ui_theme.h`** / **`UI_CC_SETTINGS_ROW_*`**、**`ui_style_cc_interactive_focus`** 对齐（灰行、细边框、蓝描边缩放），全屏底 **`UI_THEME_SCREEN_BG`**。
 
 ### 控制中心
 
@@ -40,7 +40,7 @@
 
 ### 系统设置
 
-- 列表文案对齐固件 §6 / §5；行左 `LV_SYMBOL_*`、语言行 `LV_SYMBOL_KEYBOARD`；Flex 行；列表剩余高度与滚动；滚动结束预览日志；与控制中心上滑关闭手势区分（`cc_settings_list_scroll_end_cb`、`cc_sync_settings_list_geom`）。行显隐：**`src/ui/ui_settings_config.h`** 中 **`UI_SETTINGS_SHOW_*`**（见 **`.cursor/rules/api.md`** §**6.3**）。
+- 列表文案对齐固件 §6 / §5；行左 `LV_SYMBOL_*`、语言行 `LV_SYMBOL_KEYBOARD`；Flex 行；列表剩余高度与滚动；滚动结束预览日志；与控制中心上滑关闭手势区分（`cc_settings_list_scroll_end_cb`、`cc_sync_settings_list_geom`）。行显隐：**`src/ui/theme/ui_settings_config.h`** 中 **`UI_SETTINGS_SHOW_*`**（见 **`.cursor/rules/api.md`** §**6.3**）。
 
 ### 模式切换
 

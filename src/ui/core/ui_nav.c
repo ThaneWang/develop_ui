@@ -11,7 +11,7 @@
 #include "ui_i18n.h"
 #include "ui_page_main.h"
 #include "ui_page_replay.h"
-#include "../logging.h"
+#include "../../logging.h"
 #include "lvgl/lvgl.h"
 
 void ui_nav_rebuild_main(lv_obj_t *scr)

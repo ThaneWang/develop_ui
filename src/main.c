@@ -4,10 +4,10 @@
  *
  * 与 UI 的依赖关系（调用顺序不可颠倒）：
  * 1. `lv_init()` → `ui_font_init()`（静态 Noto SC 16）→ HAL → `my_ui_init()`（内先 **`ui_sim_settings_boot_load()`** 再开机动画/主页）。
- * 2. `#include "ui/ui.h"`：声明 `my_ui_init()`，并提供分辨率宏（**800×480**）给 HAL。
- * 3. `#include "ui/ui_font.h"` + `ui_font_init()`：在 `lv_init()` 之后完成中文字体就绪。
+ * 2. `#include "ui/core/ui.h"`：声明 `my_ui_init()`，并提供分辨率宏（**800×480**）给 HAL。
+ * 3. `#include "ui/platform/ui_font.h"` + `ui_font_init()`：在 `lv_init()` 之后完成中文字体就绪。
  * 4. `#include "logging.h"`：与 UI 模块共用日志输出。
- * 5. 各 `src/ui/*.c` 由 CMake 链入 `main`；除 `ui/ui.h`、`ui/ui_font.h` 外不必包含其它 UI 内部头文件。
+ * 5. `src/ui/` 下各子目录中的 `.c` 由 CMake 链入 `main`；对外仅需 `ui/core/ui.h`、`ui/platform/ui_font.h`（见 `src/ui/README.md`）。
  */
 
 /*********************
@@ -33,8 +33,8 @@
 
 #include "hal/hal.h"
 
-#include "ui/ui.h"
-#include "ui/ui_font.h"
+#include "ui/core/ui.h"
+#include "ui/platform/ui_font.h"
 #include "logging.h"
 
 /*********************

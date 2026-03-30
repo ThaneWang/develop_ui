@@ -48,7 +48,7 @@
 
 - **产品能力大纲**：**`docs/firmware-fw-v1-framework.md`**（FW-V1，文首版本说明）。
 - **章节 ↔ 模拟器 UI 对照表**：**`docs/ui-fw-v1-mapping.md`**。
-- **源码占位**：**`src/ui/ui_page_*.c`** 等；CMake 见 **`docs/ui-simulator-status.md`** §3。
+- **源码占位**：**`src/ui/pages/ui_page_*.c`** 等；CMake 见 **`docs/ui-simulator-status.md`** §3。
 
 ### 2.2 模拟器实现与优化状态
 

@@ -7,7 +7,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 
-#include "../logging.h"
+#include "../../logging.h"
 #include "ui.h"
 #include "ui_app_state.h"
 #include "ui_bt_state.h"

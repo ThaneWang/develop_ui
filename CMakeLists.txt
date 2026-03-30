@@ -91,29 +91,29 @@ else()
     list(APPEND MAIN_SOURCES src/main.c)
 endif()
 
-#添加自定义的ui程序进编译（入口 ui.c；页面/事件/导航拆分）
+# 自定义 UI：`src/ui/` 按子目录分类（见 `src/ui/README.md`）；入口 `core/ui.c`
     list(APPEND MAIN_SOURCES
         src/noto_sans_sc_16.c
-        src/ui/ui.c
-        src/ui/ui_boot.c
-        src/ui/ui_font.c
-        src/ui/ui_i18n.c
-        src/ui/ui_app_state.c
-        src/ui/ui_style.c
-        src/ui/ui_events.c
-        src/ui/ui_indev.c
-        src/ui/ui_nav.c
-        src/ui/ui_display.c
-        src/ui/ui_hw_hal.c
-        src/ui/ui_mode_carousel.c
-        src/ui/ui_page_main.c
-        src/ui/ui_page_replay.c
-        src/ui/ui_page_bt_settings.c
-        src/ui/ui_bt_nav.c
-        src/ui/ui_cc_settings_state.c
-        src/ui/ui_boot_debug_log.c
-        src/ui/ui_sim_settings_persist.c
-        src/ui/ui_bt_state.c
+        src/ui/core/ui.c
+        src/ui/core/ui_boot.c
+        src/ui/platform/ui_font.c
+        src/ui/state/ui_i18n.c
+        src/ui/state/ui_app_state.c
+        src/ui/theme/ui_style.c
+        src/ui/core/ui_events.c
+        src/ui/platform/ui_indev.c
+        src/ui/core/ui_nav.c
+        src/ui/platform/ui_display.c
+        src/ui/platform/ui_hw_hal.c
+        src/ui/widgets/ui_mode_carousel.c
+        src/ui/pages/ui_page_main.c
+        src/ui/pages/ui_page_replay.c
+        src/ui/pages/ui_page_bt_settings.c
+        src/ui/core/ui_bt_nav.c
+        src/ui/state/ui_cc_settings_state.c
+        src/ui/diag/ui_boot_debug_log.c
+        src/ui/state/ui_sim_settings_persist.c
+        src/ui/state/ui_bt_state.c
     )
     list(APPEND MAIN_SOURCES src/logging.c)
 
@@ -173,7 +173,17 @@ endif()
 
 add_executable(main ${MAIN_SOURCES})
 target_compile_definitions(main PRIVATE LV_CONF_INCLUDE_SIMPLE)
-# 系统设置列表项开关见 `src/ui/ui_settings_config.h`（`UI_SETTINGS_SHOW_*`，1 显示 / 0 隐藏）。示例：关闭「蓝牙」行
+target_include_directories(main PRIVATE
+    ${PROJECT_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}/src/ui/core
+    ${PROJECT_SOURCE_DIR}/src/ui/platform
+    ${PROJECT_SOURCE_DIR}/src/ui/state
+    ${PROJECT_SOURCE_DIR}/src/ui/theme
+    ${PROJECT_SOURCE_DIR}/src/ui/widgets
+    ${PROJECT_SOURCE_DIR}/src/ui/pages
+    ${PROJECT_SOURCE_DIR}/src/ui/diag
+)
+# 系统设置列表项开关见 `src/ui/theme/ui_settings_config.h`（`UI_SETTINGS_SHOW_*`，1 显示 / 0 隐藏）。示例：关闭「蓝牙」行
 # target_compile_definitions(main PRIVATE UI_SETTINGS_SHOW_BT=0)
 # 产品 P0 仅三项拍摄模式：target_compile_definitions(main PRIVATE UI_DEBUG_ALL_SHOOT_MODES=0)
 target_link_libraries(main ${MAIN_LIBS})

@@ -3,7 +3,7 @@
  * @brief 中文字体：静态字库 `noto_sans_sc_16`（`LV_USE_NOTO_SANS_SC_16_STATIC`）。
  */
 #include "ui_font.h"
-#include "../logging.h"
+#include "../../logging.h"
 #include "lvgl/lvgl.h"
 
 #if LV_USE_NOTO_SANS_SC_16_STATIC

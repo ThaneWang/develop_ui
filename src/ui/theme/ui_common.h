@@ -79,6 +79,23 @@
 #define UI_SWIPE_LIST_SCROLL_EPS  LV_MAX(3, (MY_SCREEN_HEIGHT * UI_SWIPE_LIST_SCROLL_FRAC_NUM) / UI_SWIPE_LIST_SCROLL_FRAC_DEN)
 
 /**
+ * 下拉控制中心 / 上滑模式页：松手时若跟手露出 ≥ 本千分比则 **ease_out** 吸附完全展开，否则缓动收回（避免须拉满 `UI_SWIPE_COMMIT_*` 才打开）。
+ */
+#ifndef UI_PANEL_SNAP_OPEN_PERMILLE
+#define UI_PANEL_SNAP_OPEN_PERMILLE 500
+#endif
+/** 面板边缘吸附动画：按 **全行程** 计的基准 ms；实际时长 = 本值 ×（剩余像素 / 参考行程），再钳到 MIN/MAX。 */
+#ifndef UI_PANEL_EDGE_ANIM_MS
+#define UI_PANEL_EDGE_ANIM_MS 260
+#endif
+#ifndef UI_PANEL_EDGE_ANIM_MS_MIN
+#define UI_PANEL_EDGE_ANIM_MS_MIN 120
+#endif
+#ifndef UI_PANEL_EDGE_ANIM_MS_MAX
+#define UI_PANEL_EDGE_ANIM_MS_MAX 340
+#endif
+
+/**
  * 指针设备滚动触发门槛（px，`lv_indev_set_scroll_limit`）：手指移动超过该距离后 LVGL 才从「点击」转为「拖动/滚动」。
  * **钝化/延迟感**：提高到 **22～28** 可减少轻移即滚列表/模式条；与全屏手势 `UI_SWIPE_DIR_LOCK_*` 分工不同（后者在 `ui_page_main`）。
  */
@@ -135,6 +152,15 @@
 
 /** 横条单列总高度（px）：缩小图标框后与卡宽配套（图标 `montserrat_28` + 两行文案）。 */
 #define UI_MODE_STRIP_ROW_H  LV_MAX(118, (MY_SCREEN_WIDTH * 16) / 100)
+
+/** 模式页顶栏（标题+关闭）高度（px），与 `ui_page_main.c` 中 `hdr` 一致；其下为宽触区竖向范围。 */
+#ifndef UI_MODE_PANEL_HEADER_H
+#define UI_MODE_PANEL_HEADER_H  52
+#endif
+/**
+ * 模式页宽触区与横条 **单列几何** 对齐：左右各 **`2 × (UI_MODE_STRIP_PAGE_W + UI_MODE_STRIP_GAP)`**（对应图示 **左/右各两列**），
+ * 左 **第一列** → 中心槽 −2、**第二列** → −1；右对称为 +1 / +2。左区 **纵贯整屏高**；`main_create_mode_panel` 末尾 **`lv_obj_move_foreground(hdr)`** 使顶栏盖在左区上，保留标题栏下滑关闭。
+ */
 
 /**
  * 模式卡片选中态（边框/底色）样式过渡时长（ms，`lv_style_transition_dsc_init`）。

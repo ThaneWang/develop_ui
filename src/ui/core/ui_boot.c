@@ -9,7 +9,7 @@
 #include "ui_font.h"
 #include "ui_i18n.h"
 #include "ui_page_main.h"
-#include "../logging.h"
+#include "../../logging.h"
 #include "lvgl/lvgl.h"
 
 #define UI_BOOT_BAR_MS    2200

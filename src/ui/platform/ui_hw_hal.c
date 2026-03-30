@@ -6,7 +6,7 @@
 
 #include <stdio.h>
 
-#include "../logging.h"
+#include "../../logging.h"
 
 static const char *screen_rot_name(ui_screen_rotation_t r)
 {

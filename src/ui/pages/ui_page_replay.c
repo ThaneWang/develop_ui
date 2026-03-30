@@ -1,6 +1,7 @@
 /**
  * @file ui_page_replay.c
  * @brief 回放页：顶栏（标题 / 时长 / 删除）、暂停态（上传 + 播放）、播放态（画面占位 + 进度条）；左滑回主页。
+ * 视觉与 **`ui_theme.h`** / 控制中心列表行（**`UI_CC_SETTINGS_ROW_*`**）、**`ui_style_cc_interactive_focus`** 对齐。
  * 视频解码见 **`ui_replay_player_load_request()`** 占位实现。
  * @note 左滑阈值见 **`ui_common.h`** 与 **`.cursor/rules/ui_swipe_gestures.md`**。
  */
@@ -11,7 +12,7 @@
 #include "ui_events.h"
 #include "ui_i18n.h"
 #include "ui_style.h"
-#include "../logging.h"
+#include "../../logging.h"
 #include "lvgl/lvgl.h"
 
 /** 播放态底部进度条区域高度（px） */
@@ -125,23 +126,38 @@ static void replay_set_playing(lv_obj_t *top_bar, bool playing)
     }
 }
 
-/** 创建顶栏右侧「删除」样式按钮（青底圆角）。 */
+/** 文本按钮：与控制中心/蓝牙设置行一致（灰底半透明 + 细边框 + 圆角 + 交互描边缩放）。 */
 static lv_obj_t *replay_make_text_button(lv_obj_t *parent, ui_str_id_t sid)
 {
     lv_obj_t *btn = lv_obj_create(parent);
-    lv_obj_set_size(btn, LV_SIZE_CONTENT, 36);
+    lv_obj_set_size(btn, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_min_height(btn, 44, 0);
     lv_obj_set_style_pad_hor(btn, 12, 0);
-    lv_obj_set_style_bg_color(btn, lv_color_hex(UI_ZONE_CYAN), 0);
+    lv_obj_set_style_pad_ver(btn, 10, 0);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(UI_CC_SETTINGS_ROW_BG), 0);
+    lv_obj_set_style_bg_opa(btn, UI_CC_SETTINGS_ROW_BG_OPA, 0);
+    lv_obj_set_style_border_color(btn, lv_color_hex(UI_CC_SETTINGS_ROW_BORDER), 0);
+    lv_obj_set_style_border_width(btn, UI_CC_SETTINGS_ROW_BORDER_W, 0);
     lv_obj_set_style_radius(btn, 8, 0);
-    lv_obj_set_style_border_width(btn, 0, 0);
     lv_obj_remove_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
+    ui_style_cc_interactive_focus(btn);
     lv_obj_t *lb = lv_label_create(btn);
     ui_i18n_bind_label(lb, sid);
     ui_style_zone_label(lb);
     lv_label_set_long_mode(lb, LV_LABEL_LONG_CLIP);
     lv_obj_center(lb);
     return btn;
+}
+
+/** 将容器设为与设置列表行相同的底/边/圆角（高度由调用方决定）。 */
+static void replay_style_panel_like_cc_row(lv_obj_t *obj)
+{
+    lv_obj_set_style_bg_color(obj, lv_color_hex(UI_CC_SETTINGS_ROW_BG), 0);
+    lv_obj_set_style_bg_opa(obj, UI_CC_SETTINGS_ROW_BG_OPA, 0);
+    lv_obj_set_style_border_color(obj, lv_color_hex(UI_CC_SETTINGS_ROW_BORDER), 0);
+    lv_obj_set_style_border_width(obj, UI_CC_SETTINGS_ROW_BORDER_W, 0);
+    lv_obj_set_style_radius(obj, 8, 0);
 }
 
 static void replay_stub_delete_cb(lv_event_t *e)
@@ -217,7 +233,7 @@ void ui_page_replay_create(lv_obj_t *scr)
     s_replay_mode_name_l = NULL;
     s_replay_playing = false;
 
-    lv_obj_set_style_bg_color(scr, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(scr, lv_color_hex(UI_THEME_SCREEN_BG), 0);
     lv_obj_set_style_pad_all(scr, 0, 0);
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -285,10 +301,8 @@ void ui_page_replay_create(lv_obj_t *scr)
     lv_obj_add_flag(s_replay_title_playing_l, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t *dur_panel = lv_obj_create(top_bar);
-    lv_obj_set_size(dur_panel, 140, 36);
-    lv_obj_set_style_bg_color(dur_panel, lv_color_hex(UI_ZONE_CYAN), 0);
-    lv_obj_set_style_radius(dur_panel, 6, 0);
-    lv_obj_set_style_border_width(dur_panel, 0, 0);
+    lv_obj_set_size(dur_panel, 140, 40);
+    replay_style_panel_like_cc_row(dur_panel);
     lv_obj_set_style_pad_column(dur_panel, 6, 0);
     lv_obj_remove_flag(dur_panel, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_layout(dur_panel, LV_LAYOUT_FLEX);
@@ -325,8 +339,9 @@ void ui_page_replay_create(lv_obj_t *scr)
     lv_obj_t *almond = lv_obj_create(s_replay_mid_paused);
     lv_obj_set_size(almond, (lv_coord_t)(MY_SCREEN_WIDTH * 55 / 100), 120);
     lv_obj_set_style_radius(almond, 60, 0);
-    lv_obj_set_style_bg_color(almond, lv_color_hex(0xB2DFDB), 0);
-    lv_obj_set_style_border_width(almond, 0, 0);
+    lv_obj_set_style_bg_color(almond, lv_color_hex(UI_THEME_CC_PAGE_BG), 0);
+    lv_obj_set_style_border_color(almond, lv_color_hex(UI_CC_SETTINGS_ROW_BORDER), 0);
+    lv_obj_set_style_border_width(almond, UI_CC_SETTINGS_ROW_BORDER_W, 0);
     lv_obj_remove_flag(almond, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     lv_obj_center(almond);
 
@@ -337,10 +352,13 @@ void ui_page_replay_create(lv_obj_t *scr)
     lv_obj_t *play_disc = lv_obj_create(almond);
     lv_obj_set_size(play_disc, 100, 100);
     lv_obj_set_style_radius(play_disc, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(play_disc, lv_color_hex(UI_ZONE_CYAN), 0);
-    lv_obj_set_style_border_width(play_disc, 0, 0);
+    lv_obj_set_style_bg_color(play_disc, lv_color_hex(UI_CC_SETTINGS_ROW_BG), 0);
+    lv_obj_set_style_bg_opa(play_disc, UI_CC_SETTINGS_ROW_BG_OPA, 0);
+    lv_obj_set_style_border_color(play_disc, lv_color_hex(UI_CC_SETTINGS_ROW_BORDER), 0);
+    lv_obj_set_style_border_width(play_disc, UI_CC_SETTINGS_ROW_BORDER_W, 0);
     lv_obj_remove_flag(play_disc, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(play_disc, LV_OBJ_FLAG_CLICKABLE);
+    ui_style_cc_interactive_focus(play_disc);
     lv_obj_add_event_cb(play_disc, replay_play_clicked_cb, LV_EVENT_CLICKED, top_bar);
     lv_obj_center(play_disc);
 
@@ -363,9 +381,9 @@ void ui_page_replay_create(lv_obj_t *scr)
     lv_obj_set_size(video_frame, MY_SCREEN_WIDTH - 32, mid_h_init - 40);
     lv_obj_set_style_max_height(video_frame, mid_h_init - 24, 0);
     lv_obj_center(video_frame);
-    lv_obj_set_style_bg_color(video_frame, lv_color_hex(0xF5F5F5), 0);
-    lv_obj_set_style_border_color(video_frame, lv_palette_main(LV_PALETTE_BLUE), 0);
-    lv_obj_set_style_border_width(video_frame, 3, 0);
+    lv_obj_set_style_bg_color(video_frame, lv_color_hex(UI_THEME_CC_PAGE_BG), 0);
+    lv_obj_set_style_border_color(video_frame, lv_color_hex(UI_CC_SETTINGS_ROW_BORDER), 0);
+    lv_obj_set_style_border_width(video_frame, UI_CC_SETTINGS_ROW_BORDER_W, 0);
     lv_obj_set_style_radius(video_frame, 8, 0);
     lv_obj_remove_flag(video_frame, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(video_frame, LV_OBJ_FLAG_CLICKABLE);
@@ -375,7 +393,7 @@ void ui_page_replay_create(lv_obj_t *scr)
     lv_label_set_text_static(eye, LV_SYMBOL_EYE_OPEN);
     lv_label_set_long_mode(eye, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_font(eye, &lv_font_montserrat_40, 0);
-    lv_obj_set_style_text_color(eye, lv_color_hex(0x7dce9a), 0);
+    lv_obj_set_style_text_color(eye, lv_color_hex(UI_CC_SETTINGS_ROW_BORDER), 0);
     lv_obj_remove_flag(eye, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_center(eye);
 
@@ -417,8 +435,10 @@ void ui_page_replay_create(lv_obj_t *scr)
     s_replay_bot_playing = lv_obj_create(overlay);
     lv_obj_set_size(s_replay_bot_playing, MY_SCREEN_WIDTH, REPLAY_PROGRESS_ZONE_H);
     lv_obj_align(s_replay_bot_playing, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_bg_color(s_replay_bot_playing, lv_color_hex(UI_ZONE_CYAN), 0);
-    lv_obj_set_style_border_width(s_replay_bot_playing, 0, 0);
+    lv_obj_set_style_bg_color(s_replay_bot_playing, lv_color_hex(UI_THEME_CC_PAGE_BG), 0);
+    lv_obj_set_style_border_side(s_replay_bot_playing, LV_BORDER_SIDE_TOP, 0);
+    lv_obj_set_style_border_color(s_replay_bot_playing, lv_color_hex(UI_CC_SETTINGS_ROW_BORDER), 0);
+    lv_obj_set_style_border_width(s_replay_bot_playing, UI_CC_SETTINGS_ROW_BORDER_W, 0);
     lv_obj_set_style_pad_all(s_replay_bot_playing, 6, 0);
     lv_obj_remove_flag(s_replay_bot_playing, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_layout(s_replay_bot_playing, LV_LAYOUT_FLEX);
@@ -437,7 +457,8 @@ void ui_page_replay_create(lv_obj_t *scr)
     lv_obj_set_height(bar, 10);
     lv_bar_set_range(bar, 0, 1000);
     lv_bar_set_value(bar, 0, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(bar, lv_color_hex(0xE0E0E0), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(UI_CC_SETTINGS_ROW_BG), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(bar, UI_CC_SETTINGS_ROW_BG_OPA, LV_PART_MAIN);
     lv_obj_set_style_bg_color(bar, lv_palette_main(LV_PALETTE_BLUE), LV_PART_INDICATOR);
 
     lv_obj_move_foreground(overlay);

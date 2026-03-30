@@ -8,7 +8,7 @@
 #include "ui_events.h"
 #include "ui_common.h"
 #include "ui_nav.h"
-#include "../logging.h"
+#include "../../logging.h"
 #include "lvgl/lvgl.h"
 
 /** 回放页手势：按下时的触点（屏幕坐标） */

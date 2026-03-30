@@ -1,11 +1,11 @@
 # 循环横向模式列表：两种实现思路
 
-本文档记录 **拍摄模式横条**（或同类「横向循环图标」）的两种实现路径，便于选型、评审与后续重构。**产品逻辑**（`ui_app` 单一数据源、居中吸附、惯性、`SCROLL_END` 写回）见 **`.cursor/rules/rules.md`** §**1.4** 与 **`src/ui/ui_page_main.c`** 中 `s_mode_strip` 相关实现。
+本文档记录 **拍摄模式横条**（或同类「横向循环图标」）的两种实现路径，便于选型、评审与后续重构。**产品逻辑**（`ui_app` 单一数据源、居中吸附、惯性、`SCROLL_END` 写回）见 **`.cursor/rules/rules.md`** §**1.4** 与 **`src/ui/pages/ui_page_main.c`** 中 `s_mode_strip` 相关实现。
 
 ## 与本仓库当前状态的关系
 
 - **本仓库** 所携带的 **`lvgl/`** 树中 **未检索到** `lv_carousel` 组件（多为 NXP GUI Guider 等扩展）。
-- **当前实现** 为 **思路二**「**多段缓冲**」的 **工程内等价物**（**非** 动态重排，以便与 **`SCROLL_SNAP_CENTER`**、对称 **pad** 稳定配合）：**`src/ui/ui_mode_carousel.c`** + **`ui_page_main.c`** 创建 **`s_mode_strip`**；**开放项 ≥2** 时把 **同一开放顺序** 连续铺 **三份**（左/中/右缓冲带），**`SCROLL_END`** 落在左/右带时 **无动画** 对齐到 **中间带** 等效槽，**`SCROLL_SNAP_CENTER`** 与 **甩动惯性**（`SCROLL_MOMENTUM` + 指针 `scroll_throw` 调参）保留；与 **`ui_app`** 在 **`SCROLL_END`/点击** 时同步。
+- **当前实现** 为 **思路二**「**多段缓冲**」的 **工程内等价物**（**非** 动态重排，以便与 **`SCROLL_SNAP_CENTER`**、对称 **pad** 稳定配合）：**`src/ui/widgets/ui_mode_carousel.c`** + **`src/ui/pages/ui_page_main.c`** 创建 **`s_mode_strip`**；**开放项 ≥2** 时把 **同一开放顺序** 连续铺 **三份**（左/中/右缓冲带），**`SCROLL_END`** 落在左/右带时 **无动画** 对齐到 **中间带** 等效槽，**`SCROLL_SNAP_CENTER`** 与 **甩动惯性**（`SCROLL_MOMENTUM` + 指针 `scroll_throw` 调参）保留；与 **`ui_app`** 在 **`SCROLL_END`/点击** 时同步。
 - 若将来 LVGL 或第三方提供 **`lv_carousel`**，可评估 **替换** **`ui_mode_carousel`** 内部实现，**保留** 对 **`ui_app`** 的回调约定。
 
 ---
@@ -50,7 +50,7 @@
 
 | 内容 | 位置 |
 |------|------|
-| 当前横条实现（思路二·多段缓冲等价） | `src/ui/ui_mode_carousel.c`、`src/ui/ui_page_main.c`（`main_create_mode_panel`、`main_mode_strip_scroll_to_current`） |
+| 当前横条实现（思路二·多段缓冲等价） | `src/ui/widgets/ui_mode_carousel.c`、`src/ui/pages/ui_page_main.c`（`main_create_mode_panel`、`main_mode_strip_scroll_to_current`） |
 | 手势与滚动约定 | `.cursor/rules/ui_swipe_gestures.md` §**2** |
 | 模式横条与 `ui_app` 约定 | `.cursor/rules/rules.md` §**1.4** |
 
