@@ -69,11 +69,17 @@ static const char *const s_zh[UI_STR_COUNT] = {
     [UI_STR_BT_STATUS_ON] = "蓝牙已开启",
     [UI_STR_MODE_TITLE] = "拍摄模式",
     [UI_STR_MODE_BODY] =
-        "左右滑动切换模式\n点击屏幕侧边模式会先滚到中央再显示选中\n点击中央模式图标确认并返回主页\n下滑标题栏或点关闭不改动模式",
-    [UI_STR_SHOOT_MODE_3DGS] = "3DGS 实景",
-    [UI_STR_SHOOT_MODE_VIDEO] = "视频",
-    [UI_STR_SHOOT_MODE_3DGS_V] = "3DGS + 视频",
-    [UI_STR_SHOOT_MODE_STILL] = "图片",
+        "左右滑动切换模式\n多项模式时首尾相连可循环滑动\n点击屏幕侧边模式会先滚到中央再显示选中\n点击中央模式图标确认并返回主页\n下滑标题栏或点关闭不改动模式",
+    [UI_STR_BOOT_WELCOME_FMT] = "欢迎使用%s",
+    [UI_STR_BOOT_VERSION_FMT] = "当前版本%s",
+    [UI_STR_BOOT_STARTING] = "正在启动...",
+    [UI_STR_SHOOT_MODE_3DGS] = "3DGS",
+    [UI_STR_SHOOT_MODE_VIDEO] = "录像",
+    [UI_STR_SHOOT_MODE_PHOTO] = "拍照",
+    [UI_STR_SHOOT_MODE_AI_DIRECTOR] = "智能跟拍（AI Director）",
+    [UI_STR_SHOOT_MODE_3DGS_VIDEO] = "3DGS+录像",
+    [UI_STR_SHOOT_MODE_FREE_RATIO_VIDEO] = "自由比例录像",
+    [UI_STR_SHOOT_MODE_DUAL_LENS_VIDEO] = "双镜头录像",
     [UI_STR_STORAGE_FREE_FMT] = "剩余%uG",
 };
 
@@ -135,13 +141,20 @@ static const char *const s_en[UI_STR_COUNT] = {
     [UI_STR_BT_STATUS_ON] = "Bluetooth on",
     [UI_STR_MODE_TITLE] = "Shooting mode",
     [UI_STR_MODE_BODY] = "Swipe to change mode\n"
+                          "With multiple modes the strip loops end to end\n"
                           "Tap a side mode to scroll it to the center first, then it shows as selected\n"
                           "Tap the centered mode icon to apply and return home\n"
                           "Swipe down on the title bar or tap close without changing mode",
+    [UI_STR_BOOT_WELCOME_FMT] = "Welcome to Camera %s",
+    [UI_STR_BOOT_VERSION_FMT] = "Current version %s",
+    [UI_STR_BOOT_STARTING] = "Starting...",
     [UI_STR_SHOOT_MODE_3DGS] = "3DGS",
     [UI_STR_SHOOT_MODE_VIDEO] = "Video",
-    [UI_STR_SHOOT_MODE_3DGS_V] = "3DGS + Video",
-    [UI_STR_SHOOT_MODE_STILL] = "Photo",
+    [UI_STR_SHOOT_MODE_PHOTO] = "Photo",
+    [UI_STR_SHOOT_MODE_AI_DIRECTOR] = "AI Tracking (AI Director)",
+    [UI_STR_SHOOT_MODE_3DGS_VIDEO] = "3DGS + Video",
+    [UI_STR_SHOOT_MODE_FREE_RATIO_VIDEO] = "Free aspect video",
+    [UI_STR_SHOOT_MODE_DUAL_LENS_VIDEO] = "Dual-lens video",
     [UI_STR_STORAGE_FREE_FMT] = "Free%uG",
 };
 
@@ -209,3 +222,24 @@ void ui_i18n_refresh_all(void)
     }
 }
 
+ui_str_id_t ui_i18n_shoot_mode_label_id(ui_shoot_mode_t m)
+{
+    switch(m) {
+        case UI_SHOOT_MODE_3DGS:
+            return UI_STR_SHOOT_MODE_3DGS;
+        case UI_SHOOT_MODE_VIDEO:
+            return UI_STR_SHOOT_MODE_VIDEO;
+        case UI_SHOOT_MODE_PHOTO:
+            return UI_STR_SHOOT_MODE_PHOTO;
+        case UI_SHOOT_MODE_AI_DIRECTOR:
+            return UI_STR_SHOOT_MODE_AI_DIRECTOR;
+        case UI_SHOOT_MODE_3DGS_VIDEO:
+            return UI_STR_SHOOT_MODE_3DGS_VIDEO;
+        case UI_SHOOT_MODE_FREE_RATIO_VIDEO:
+            return UI_STR_SHOOT_MODE_FREE_RATIO_VIDEO;
+        case UI_SHOOT_MODE_DUAL_LENS_VIDEO:
+            return UI_STR_SHOOT_MODE_DUAL_LENS_VIDEO;
+        default:
+            return UI_STR_SHOOT_MODE_3DGS;
+    }
+}

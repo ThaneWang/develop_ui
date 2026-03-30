@@ -1,9 +1,13 @@
 /**
  * @file ui_boot.c
  * @brief 全屏开机动画：标题渐显、进度条、转圈，结束后淡出并进入 `ui_page_main_create`。
+ * 主副标题文案与字体随 `ui_i18n_get_lang()`（中文用 `ui_font_cjk()`，英文用 Montserrat）。
  */
 #include "ui_boot.h"
 #include "ui.h"
+#include "ui_app_state.h"
+#include "ui_font.h"
+#include "ui_i18n.h"
 #include "ui_page_main.h"
 #include "../logging.h"
 #include "lvgl/lvgl.h"
@@ -66,6 +70,42 @@ static void boot_title_opa_cb(void *var, int32_t v)
     lv_obj_set_style_opa((lv_obj_t *)var, (lv_opa_t)v, LV_PART_MAIN);
 }
 
+/** 按 `ui_i18n_get_lang()` 与 `UI_FW_*` 写入开机动画主标题（两行）。 */
+static void boot_set_title_i18n(lv_obj_t *title)
+{
+    char line1[96];
+    char line2[96];
+    char buf[220];
+    lv_snprintf(line1, sizeof(line1), ui_i18n_str(UI_STR_BOOT_WELCOME_FMT), UI_FW_PRODUCT_MODEL);
+    lv_snprintf(line2, sizeof(line2), ui_i18n_str(UI_STR_BOOT_VERSION_FMT), UI_FW_VERSION_STRING);
+    lv_snprintf(buf, sizeof(buf), "%s\n%s", line1, line2);
+    lv_label_set_text(title, buf);
+    if(ui_i18n_get_lang() == UI_LANG_ZH) {
+        const lv_font_t *cj = ui_font_cjk();
+        if(cj != NULL) {
+            lv_obj_set_style_text_font(title, cj, LV_PART_MAIN);
+        }
+    }
+    else {
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_20, LV_PART_MAIN);
+    }
+}
+
+/** 开机动画副标题：与系统语种一致。 */
+static void boot_set_subtitle_i18n(lv_obj_t *sub)
+{
+    lv_label_set_text(sub, ui_i18n_str(UI_STR_BOOT_STARTING));
+    if(ui_i18n_get_lang() == UI_LANG_ZH) {
+        const lv_font_t *cj = ui_font_cjk();
+        if(cj != NULL) {
+            lv_obj_set_style_text_font(sub, cj, LV_PART_MAIN);
+        }
+    }
+    else {
+        lv_obj_set_style_text_font(sub, &lv_font_montserrat_14, LV_PART_MAIN);
+    }
+}
+
 /** 清当前屏、搭建开机动画层并启动进度条与标题动画。 */
 void ui_boot_show_then_main(void)
 {
@@ -81,8 +121,7 @@ void ui_boot_show_then_main(void)
     lv_obj_remove_flag(s_boot_root, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *title = lv_label_create(s_boot_root);
-    lv_label_set_text_static(title, "LVGL Camera");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_20, LV_PART_MAIN);
+    boot_set_title_i18n(title);
     lv_obj_set_style_text_color(title, lv_color_hex(0xe8e8f0), LV_PART_MAIN);
     lv_obj_set_style_opa(title, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_CENTER, 0, -72);
@@ -97,8 +136,7 @@ void ui_boot_show_then_main(void)
     lv_anim_start(&title_anim);
 
     lv_obj_t *sub = lv_label_create(s_boot_root);
-    lv_label_set_text_static(sub, "Starting...");
-    lv_obj_set_style_text_font(sub, &lv_font_montserrat_14, LV_PART_MAIN);
+    boot_set_subtitle_i18n(sub);
     lv_obj_set_style_text_color(sub, lv_color_hex(0x8888a0), LV_PART_MAIN);
     lv_obj_align(sub, LV_ALIGN_CENTER, 0, -38);
 

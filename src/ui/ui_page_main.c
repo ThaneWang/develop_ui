@@ -20,6 +20,9 @@
 #include "lvgl/lvgl.h"
 #include "lvgl/src/layouts/grid/lv_grid.h"
 
+/** 模式横条物理槽上限：开放项 + 首尾各 1 重复页（与 `lv_roller` 无限滚轮同类循环）。 */
+#define UI_MODE_STRIP_PHYS_MAX (UI_SHOOT_MODE_COUNT + 2)
+
 #if UI_FEATURE_DISPLAY_ROTATION
 static void cc_show_rotation_view(void);
 #endif
@@ -38,8 +41,14 @@ static lv_obj_t *s_mode;
 /** 模式页横向滚动容器 */
 static lv_obj_t *s_mode_strip;
 /** 每项一页：宽等于视口，卡片在页内居中；滚动/吸附以 page 为子项，保证选中项几何居中 */
-static lv_obj_t *s_mode_pages[UI_SHOOT_MODE_COUNT];
-static lv_obj_t *s_mode_cards[UI_SHOOT_MODE_COUNT];
+static lv_obj_t *s_mode_pages[UI_MODE_STRIP_PHYS_MAX];
+static lv_obj_t *s_mode_cards[UI_MODE_STRIP_PHYS_MAX];
+/** 横条上物理子页数（含循环用的首尾重复页；`s_mode_strip_real_n >= 2` 时为 `real_n + 2`） */
+static uint32_t s_mode_strip_slot_n;
+/** 已开放模式个数（不含重复页）；用于循环边界与 `scroll_to_current` 落在中间段 */
+static uint32_t s_mode_strip_real_n;
+/** `s_mode_pages[s]` / `s_mode_cards[s]` 对应的 `ui_shoot_mode_t` */
+static ui_shoot_mode_t s_mode_strip_mode_at[UI_MODE_STRIP_PHYS_MAX];
 /** 顶栏：存储文案、模式符号、电量、蓝牙字条 */
 static lv_obj_t *s_status_storage_l;
 static lv_obj_t *s_status_mode_ic;
@@ -190,12 +199,12 @@ static void main_refresh_status_bar(void)
 static void main_mode_update_card_selection(void)
 {
     const ui_shoot_mode_t cur = ui_app_get_shoot_mode();
-    for(uint32_t i = 0; i < UI_SHOOT_MODE_COUNT; i++) {
-        lv_obj_t *c = s_mode_cards[i];
+    for(uint32_t s = 0; s < s_mode_strip_slot_n; s++) {
+        lv_obj_t *c = s_mode_cards[s];
         if(c == NULL || !lv_obj_is_valid(c)) {
             continue;
         }
-        if((ui_shoot_mode_t)i == cur) {
+        if(s_mode_strip_mode_at[s] == cur) {
             lv_obj_set_style_border_width(c, 3, 0);
             lv_obj_set_style_border_color(c, lv_palette_main(LV_PALETTE_BLUE), 0);
             lv_obj_set_style_bg_color(c, lv_color_hex(0xE8F4FF), 0);
@@ -208,14 +217,10 @@ static void main_mode_update_card_selection(void)
     }
 }
 
-/**
- * 若 `ui_app` 中保存的模式枚举非法，则置为第一项 `UI_SHOOT_MODE_3DGS`（默认进入第一个模式）。
- */
+/** 若当前模式未开放或非法，则钳到第一个已开放项（见 `ui_app_state.h` 中 `UI_SHOOT_ENABLE_*`）。 */
 static void main_mode_shoot_mode_clamp_default(void)
 {
-    if(ui_app_get_shoot_mode() >= UI_SHOOT_MODE_COUNT) {
-        ui_app_set_shoot_mode(UI_SHOOT_MODE_3DGS);
-    }
+    ui_app_shoot_mode_ensure_enabled();
 }
 
 /** 取横向滚动条视口中心下最接近的模式子项索引。 */
@@ -248,19 +253,37 @@ static uint32_t main_mode_strip_nearest_index(lv_obj_t *strip)
 /**
  * 将横条滚动并使 **当前全局模式** 对应 **页** 居中进视口（页宽小于屏宽以露出相邻模式），无动画。
  * 打开模式页时调用：从 `ui_app_get_shoot_mode()` 恢复上次选择；非法枚举先钳位到第一项。
+ * 多项开放时落在 **中间段**（物理索引 `1…real_n`），避免停在首尾重复页。
  */
 static void main_mode_strip_scroll_to_current(void)
 {
     if(s_mode_strip == NULL || !lv_obj_is_valid(s_mode_strip)) {
         return;
     }
+    if(s_mode_strip_slot_n == 0u) {
+        return;
+    }
     main_mode_shoot_mode_clamp_default();
 
-    uint32_t idx = (uint32_t)ui_app_get_shoot_mode();
-    if(idx >= UI_SHOOT_MODE_COUNT) {
-        idx = 0u;
+    const ui_shoot_mode_t want = ui_app_get_shoot_mode();
+    uint32_t slot = UINT32_MAX;
+    if(s_mode_strip_real_n >= 2u) {
+        for(uint32_t p = 1u; p <= s_mode_strip_real_n; p++) {
+            if(s_mode_strip_mode_at[p] == want) {
+                slot = p;
+                break;
+            }
+        }
     }
-    if(s_mode_pages[idx] == NULL || !lv_obj_is_valid(s_mode_pages[idx])) {
+    else {
+        for(uint32_t p = 0u; p < s_mode_strip_slot_n; p++) {
+            if(s_mode_strip_mode_at[p] == want) {
+                slot = p;
+                break;
+            }
+        }
+    }
+    if(slot == UINT32_MAX || s_mode_pages[slot] == NULL || !lv_obj_is_valid(s_mode_pages[slot])) {
         return;
     }
 
@@ -270,7 +293,7 @@ static void main_mode_strip_scroll_to_current(void)
     lv_obj_update_layout(s_mode_strip);
 
     s_mode_strip_scroll_end_suppress++;
-    lv_obj_scroll_to_view(s_mode_pages[idx], LV_ANIM_OFF);
+    lv_obj_scroll_to_view(s_mode_pages[slot], LV_ANIM_OFF);
     lv_obj_update_snap(s_mode_strip, LV_ANIM_OFF);
     s_mode_strip_scroll_end_suppress--;
 
@@ -280,7 +303,7 @@ static void main_mode_strip_scroll_to_current(void)
 
 /**
  * 用户横向滑动结束：先完成 **居中吸附**，再将 **视口中心的卡片** 写回全局模式并刷新选中态与顶栏。
- * 滑动上一项/下一项后，目标卡片与图标会停在屏幕中央。
+ * 多项开放时首尾为重复页：`SCROLL_END` 落在重复位则 **无动画跳转到中间段** 对应真项（与 `lv_roller` 无限循环同类）。
  */
 static void mode_strip_scroll_end_cb(lv_event_t *e)
 {
@@ -296,12 +319,39 @@ static void mode_strip_scroll_end_cb(lv_event_t *e)
     s_mode_strip_scroll_end_suppress--;
     lv_obj_update_layout(strip);
 
-    const uint32_t idx = main_mode_strip_nearest_index(strip);
-    if(idx < UI_SHOOT_MODE_COUNT) {
-        ui_app_set_shoot_mode((ui_shoot_mode_t)idx);
-        main_mode_update_card_selection();
-        main_refresh_status_bar();
+    const uint32_t phys_n = s_mode_strip_slot_n;
+    const uint32_t real_n = s_mode_strip_real_n;
+    const uint32_t si = main_mode_strip_nearest_index(strip);
+    if(si >= phys_n) {
+        return;
     }
+
+    if(real_n >= 2u) {
+        if(si == 0u && s_mode_pages[real_n] != NULL && lv_obj_is_valid(s_mode_pages[real_n])) {
+            s_mode_strip_scroll_end_suppress++;
+            lv_obj_scroll_to_view(s_mode_pages[real_n], LV_ANIM_OFF);
+            lv_obj_update_snap(strip, LV_ANIM_OFF);
+            s_mode_strip_scroll_end_suppress--;
+            ui_app_set_shoot_mode(s_mode_strip_mode_at[real_n]);
+            main_mode_update_card_selection();
+            main_refresh_status_bar();
+            return;
+        }
+        if(si == phys_n - 1u && s_mode_pages[1] != NULL && lv_obj_is_valid(s_mode_pages[1])) {
+            s_mode_strip_scroll_end_suppress++;
+            lv_obj_scroll_to_view(s_mode_pages[1], LV_ANIM_OFF);
+            lv_obj_update_snap(strip, LV_ANIM_OFF);
+            s_mode_strip_scroll_end_suppress--;
+            ui_app_set_shoot_mode(s_mode_strip_mode_at[1]);
+            main_mode_update_card_selection();
+            main_refresh_status_bar();
+            return;
+        }
+    }
+
+    ui_app_set_shoot_mode(s_mode_strip_mode_at[si]);
+    main_mode_update_card_selection();
+    main_refresh_status_bar();
 }
 
 /** 将语种下拉选中项与 `ui_i18n_get_lang()` 对齐（不触发回调）。 */
@@ -840,21 +890,21 @@ static void mode_icon_clicked_cb(lv_event_t *e)
     if(lv_event_get_code(e) != LV_EVENT_CLICKED) {
         return;
     }
-    const uintptr_t idx = (uintptr_t)lv_event_get_user_data(e);
-    if(idx >= UI_SHOOT_MODE_COUNT) {
+    const uintptr_t slot = (uintptr_t)lv_event_get_user_data(e);
+    if(slot >= s_mode_strip_slot_n) {
         return;
     }
-    if(s_mode_strip == NULL || !lv_obj_is_valid(s_mode_strip) || s_mode_pages[idx] == NULL ||
-       !lv_obj_is_valid(s_mode_pages[idx])) {
+    if(s_mode_strip == NULL || !lv_obj_is_valid(s_mode_strip) || s_mode_pages[slot] == NULL ||
+       !lv_obj_is_valid(s_mode_pages[slot])) {
         return;
     }
     lv_obj_update_layout(s_mode_strip);
     const uint32_t centered = main_mode_strip_nearest_index(s_mode_strip);
-    if((uint32_t)idx != centered) {
-        lv_obj_scroll_to_view(s_mode_pages[idx], LV_ANIM_ON);
+    if((uint32_t)slot != centered) {
+        lv_obj_scroll_to_view(s_mode_pages[slot], LV_ANIM_ON);
         return;
     }
-    ui_app_set_shoot_mode((ui_shoot_mode_t)idx);
+    ui_app_set_shoot_mode(s_mode_strip_mode_at[slot]);
     main_mode_update_card_selection();
     main_refresh_status_bar();
     main_show_mode_panel(false);
@@ -1880,21 +1930,70 @@ static void main_create_control_center(lv_obj_t *scr)
     s_cc_open = false;
 }
 
+/**
+ * 在 `s_mode_strip` 上追加一页（透明 page + 卡片 + 可点图标 + i18n 名称），并写入 `s_mode_pages` / `s_mode_cards` / `s_mode_strip_mode_at[phys_idx]`。
+ * @param phys_idx 物理槽索引，须小于 `UI_MODE_STRIP_PHYS_MAX`。
+ */
+static void main_mode_strip_build_page(ui_shoot_mode_t m, uint32_t phys_idx, lv_coord_t card_w, lv_coord_t page_w)
+{
+    if(phys_idx >= UI_MODE_STRIP_PHYS_MAX) {
+        return;
+    }
+    s_mode_strip_mode_at[phys_idx] = m;
+
+    lv_obj_t *page = lv_obj_create(s_mode_strip);
+    s_mode_pages[phys_idx] = page;
+    lv_obj_set_size(page, page_w, 200);
+    lv_obj_set_style_bg_opa(page, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(page, 0, 0);
+    lv_obj_remove_flag(page, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLL_ELASTIC |
+                                LV_OBJ_FLAG_SCROLL_MOMENTUM);
+    lv_obj_set_layout(page, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(page, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(page, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t *card = lv_obj_create(page);
+    s_mode_cards[phys_idx] = card;
+    lv_obj_set_size(card, card_w, 200);
+    lv_obj_set_style_radius(card, 12, 0);
+    lv_obj_set_style_pad_all(card, 10, 0);
+    lv_obj_set_style_border_width(card, 0, 0);
+    lv_obj_set_layout(card, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(card, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_remove_flag(card, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ELASTIC |
+                             LV_OBJ_FLAG_SCROLL_MOMENTUM);
+
+    lv_obj_t *ic = lv_label_create(card);
+    lv_label_set_text_static(ic, ui_app_shoot_mode_icon_glyph(m));
+    lv_label_set_long_mode(ic, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_font(ic, &lv_font_montserrat_40, 0);
+    lv_obj_set_style_text_color(ic, lv_color_hex(0x2a6ae9), 0);
+    lv_obj_set_style_text_align(ic, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_remove_flag(ic, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM);
+    lv_obj_add_flag(ic, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_ext_click_area(ic, 10);
+    lv_obj_add_event_cb(ic, mode_icon_clicked_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)phys_idx);
+
+    lv_obj_t *nm = lv_label_create(card);
+    ui_i18n_bind_label(nm, ui_i18n_shoot_mode_label_id(m));
+    ui_style_zone_label(nm);
+    lv_label_set_long_mode(nm, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(nm, card_w - 20);
+    lv_obj_set_style_text_align(nm, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_remove_flag(nm, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM);
+}
+
 /** 全屏拍摄模式页：标题栏下滑关闭、横向滚动选模式、卡片图标与 i18n 名称。 */
 static void main_create_mode_panel(lv_obj_t *scr)
 {
-    for(uint32_t mi = 0; mi < UI_SHOOT_MODE_COUNT; mi++) {
+    for(uint32_t mi = 0; mi < UI_MODE_STRIP_PHYS_MAX; mi++) {
         s_mode_pages[mi] = NULL;
         s_mode_cards[mi] = NULL;
     }
+    s_mode_strip_slot_n = 0u;
+    s_mode_strip_real_n = 0u;
     s_mode_strip = NULL;
-
-    static const ui_str_id_t mode_name_ids[UI_SHOOT_MODE_COUNT] = {
-        UI_STR_SHOOT_MODE_3DGS,
-        UI_STR_SHOOT_MODE_VIDEO,
-        UI_STR_SHOOT_MODE_3DGS_V,
-        UI_STR_SHOOT_MODE_STILL,
-    };
 
     s_mode = lv_obj_create(scr);
     lv_obj_set_size(s_mode, MY_SCREEN_WIDTH, MY_SCREEN_HEIGHT);
@@ -1966,6 +2065,7 @@ static void main_create_mode_panel(lv_obj_t *scr)
     const lv_coord_t card_w = (lv_coord_t)UI_MODE_CARD_W;
     const lv_coord_t page_w = (lv_coord_t)UI_MODE_STRIP_PAGE_W;
     lv_obj_set_scroll_dir(s_mode_strip, LV_DIR_HOR);
+    lv_obj_set_scrollbar_mode(s_mode_strip, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_scroll_snap_x(s_mode_strip, LV_SCROLL_SNAP_CENTER);
     lv_obj_add_flag(s_mode_strip, LV_OBJ_FLAG_SCROLL_ONE);
     lv_obj_add_event_cb(s_mode_strip, mode_strip_scroll_end_cb, LV_EVENT_SCROLL_END, NULL);
@@ -1974,52 +2074,32 @@ static void main_create_mode_panel(lv_obj_t *scr)
     lv_obj_set_flex_flow(s_mode_strip, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(s_mode_strip, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    for(uint32_t i = 0; i < UI_SHOOT_MODE_COUNT; i++) {
-        lv_obj_t *page = lv_obj_create(s_mode_strip);
-        s_mode_pages[i] = page;
-        lv_obj_set_size(page, page_w, 200);
-        lv_obj_set_style_bg_opa(page, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_border_width(page, 0, 0);
-        lv_obj_remove_flag(page, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLL_ELASTIC |
-                                    LV_OBJ_FLAG_SCROLL_MOMENTUM);
-        lv_obj_set_layout(page, LV_LAYOUT_FLEX);
-        lv_obj_set_flex_flow(page, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(page, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-        lv_obj_t *card = lv_obj_create(page);
-        s_mode_cards[i] = card;
-        lv_obj_set_size(card, card_w, 200);
-        lv_obj_set_style_radius(card, 12, 0);
-        lv_obj_set_style_pad_all(card, 10, 0);
-        lv_obj_set_style_border_width(card, 0, 0);
-        lv_obj_set_layout(card, LV_LAYOUT_FLEX);
-        lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(card, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        /* 整卡不可点、不可滚，避免抢横条手势；滑动由父级 s_mode_strip 统一处理 */
-        lv_obj_remove_flag(card, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ELASTIC |
-                                 LV_OBJ_FLAG_SCROLL_MOMENTUM);
-
-        lv_obj_t *ic = lv_label_create(card);
-        lv_label_set_text_static(ic, ui_app_shoot_mode_icon_glyph((ui_shoot_mode_t)i));
-        lv_label_set_long_mode(ic, LV_LABEL_LONG_CLIP);
-        lv_obj_set_style_text_font(ic, &lv_font_montserrat_40, 0);
-        lv_obj_set_style_text_color(ic, lv_color_hex(0x2a6ae9), 0);
-        lv_obj_set_style_text_align(ic, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-        /* 符号随卡片平移，不在格内单独滚动（去掉 Label 默认 SCROLLABLE 等） */
-        lv_obj_remove_flag(ic, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM);
-        lv_obj_add_flag(ic, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_ext_click_area(ic, 10);
-        lv_obj_add_event_cb(ic, mode_icon_clicked_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
-
-        lv_obj_t *nm = lv_label_create(card);
-        ui_i18n_bind_label(nm, mode_name_ids[i]);
-        ui_style_zone_label(nm);
-        lv_label_set_long_mode(nm, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(nm, card_w - 20);
-        lv_obj_set_style_text_align(nm, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-        lv_obj_remove_flag(nm, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM);
+    ui_shoot_mode_t modes_list[UI_SHOOT_MODE_COUNT];
+    uint32_t n = 0u;
+    for(ui_shoot_mode_t m = 0; m < UI_SHOOT_MODE_COUNT; m++) {
+        if(!ui_shoot_mode_option_enabled(m)) {
+            continue;
+        }
+        if(n < UI_SHOOT_MODE_COUNT) {
+            modes_list[n++] = m;
+        }
     }
+    s_mode_strip_real_n = n;
 
+    uint32_t phys = 0u;
+    if(n >= 2u) {
+        main_mode_strip_build_page(modes_list[n - 1u], phys++, card_w, page_w);
+        for(uint32_t i = 0; i < n; i++) {
+            main_mode_strip_build_page(modes_list[i], phys++, card_w, page_w);
+        }
+        main_mode_strip_build_page(modes_list[0], phys++, card_w, page_w);
+    }
+    else if(n == 1u) {
+        main_mode_strip_build_page(modes_list[0], phys++, card_w, page_w);
+    }
+    s_mode_strip_slot_n = phys;
+
+    ui_app_shoot_mode_ensure_enabled();
     main_mode_update_card_selection();
     s_mode_open = false;
 }
@@ -2131,10 +2211,12 @@ void ui_page_main_create(lv_obj_t *scr)
     s_cc_sheet = NULL;
     s_mode = NULL;
     s_mode_strip = NULL;
-    for(uint32_t mi = 0; mi < UI_SHOOT_MODE_COUNT; mi++) {
+    for(uint32_t mi = 0; mi < UI_MODE_STRIP_PHYS_MAX; mi++) {
         s_mode_pages[mi] = NULL;
         s_mode_cards[mi] = NULL;
     }
+    s_mode_strip_slot_n = 0u;
+    s_mode_strip_real_n = 0u;
     s_status_storage_l = NULL;
     s_status_mode_ic = NULL;
     s_status_bat_l = NULL;

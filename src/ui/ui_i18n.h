@@ -6,6 +6,7 @@
 #define UI_I18N_H
 
 #include "lvgl/lvgl.h"
+#include "ui_app_state.h"
 
 typedef enum {
     UI_LANG_ZH = 0,
@@ -73,11 +74,18 @@ typedef enum {
     UI_STR_BT_STATUS_ON,
     UI_STR_MODE_TITLE,
     UI_STR_MODE_BODY,
-    /** 拍摄模式名称（模式选择条） */
+    /** 开机动画：`%s` 依次为 `UI_FW_PRODUCT_MODEL`、`UI_FW_VERSION_STRING`（见 `ui_boot.c`） */
+    UI_STR_BOOT_WELCOME_FMT,
+    UI_STR_BOOT_VERSION_FMT,
+    UI_STR_BOOT_STARTING,
+    /** 拍摄模式名称（模式选择条，与 `ui_shoot_mode_t` 一一对应） */
     UI_STR_SHOOT_MODE_3DGS,
     UI_STR_SHOOT_MODE_VIDEO,
-    UI_STR_SHOOT_MODE_3DGS_V,
-    UI_STR_SHOOT_MODE_STILL,
+    UI_STR_SHOOT_MODE_PHOTO,
+    UI_STR_SHOOT_MODE_AI_DIRECTOR,
+    UI_STR_SHOOT_MODE_3DGS_VIDEO,
+    UI_STR_SHOOT_MODE_FREE_RATIO_VIDEO,
+    UI_STR_SHOOT_MODE_DUAL_LENS_VIDEO,
     /** 状态栏存储：`lv_label_set_text_fmt(..., fmt, free_gb)` */
     UI_STR_STORAGE_FREE_FMT,
     UI_STR_COUNT
@@ -95,5 +103,8 @@ void ui_i18n_set_lang(ui_lang_t lang);
 ui_lang_t ui_i18n_get_lang(void);
 /** 刷新全部已绑定 Label 并重算根屏布局。 */
 void ui_i18n_refresh_all(void);
+
+/** 将 `ui_shoot_mode_t` 映射到模式名称词条（非法值则 3DGS）。 */
+ui_str_id_t ui_i18n_shoot_mode_label_id(ui_shoot_mode_t m);
 
 #endif
