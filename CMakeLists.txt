@@ -98,8 +98,10 @@ endif()
         src/ui/ui_boot.c
         src/ui/ui_font.c
         src/ui/ui_i18n.c
+        src/ui/ui_app_state.c
         src/ui/ui_style.c
         src/ui/ui_events.c
+        src/ui/ui_indev.c
         src/ui/ui_nav.c
         src/ui/ui_display.c
         src/ui/ui_page_main.c

@@ -11,6 +11,7 @@
 #include "../logging.h"
 #include "lvgl/lvgl.h"
 
+/** `lv_async_call`：清屏、复位旋转与 i18n 绑定，进入回放页。 */
 void ui_nav_replace_with_replay_async(void *user_data)
 {
     LV_UNUSED(user_data);
@@ -21,6 +22,7 @@ void ui_nav_replace_with_replay_async(void *user_data)
     ui_page_replay_create(scr);
 }
 
+/** `lv_async_call`：清屏并重置 i18n 绑定，重建主界面。 */
 void ui_nav_replace_with_main_async(void *user_data)
 {
     LV_UNUSED(user_data);
@@ -31,6 +33,7 @@ void ui_nav_replace_with_main_async(void *user_data)
     LOG_DEBUG("主页已恢复（与进入回放前一致）");
 }
 
+/** `lv_async_call`：清屏、复位旋转与 i18n 绑定，进入蓝牙设置页。 */
 void ui_nav_replace_with_bt_settings_async(void *user_data)
 {
     LV_UNUSED(user_data);

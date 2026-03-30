@@ -5,6 +5,7 @@
 #include "ui_page_bt_settings.h"
 #include "ui_bt_state.h"
 #include "ui_common.h"
+#include "ui_indev.h"
 #include "ui_i18n.h"
 #include "ui_nav.h"
 #include "ui_style.h"
@@ -16,12 +17,14 @@ static lv_obj_t *s_reconn_spinner;
 static bool s_pair_active;
 static bool s_reconn_active;
 
+/** 返回按钮：异步回到主界面。 */
 static void bt_back_cb(lv_event_t *e)
 {
     LV_UNUSED(e);
     lv_async_call(ui_nav_replace_with_main_async, NULL);
 }
 
+/** 总开关：`VALUE_CHANGED` 时写 `ui_bt_state` 并打日志。 */
 static void bt_master_sw_cb(lv_event_t *e)
 {
     lv_obj_t *sw = lv_event_get_target(e);
@@ -31,6 +34,7 @@ static void bt_master_sw_cb(lv_event_t *e)
     LOG_DEBUG("BT master %s", on ? "on" : "off");
 }
 
+/** 配对行点击：切换配对动画占位显隐。 */
 static void bt_pair_row_cb(lv_event_t *e)
 {
     LV_UNUSED(e);
@@ -50,6 +54,7 @@ static void bt_pair_row_cb(lv_event_t *e)
     }
 }
 
+/** 重连行点击：切换重连动画占位显隐。 */
 static void bt_reconn_row_cb(lv_event_t *e)
 {
     LV_UNUSED(e);
@@ -69,6 +74,7 @@ static void bt_reconn_row_cb(lv_event_t *e)
     }
 }
 
+/** 低功耗开关：`VALUE_CHANGED` 时写 `ui_bt_set_low_power`。 */
 static void bt_low_power_sw_cb(lv_event_t *e)
 {
     lv_obj_t *sw = lv_event_get_target(e);
@@ -78,6 +84,7 @@ static void bt_low_power_sw_cb(lv_event_t *e)
     LOG_DEBUG("BT low power %s", on ? "on" : "off");
 }
 
+/** Wi‑Fi 密码占位行：仅打印日志。 */
 static void bt_wifi_row_cb(lv_event_t *e)
 {
     LV_UNUSED(e);
@@ -85,12 +92,14 @@ static void bt_wifi_row_cb(lv_event_t *e)
     LOG_DEBUG("BT WiFi set password (placeholder)");
 }
 
+/** 可点击行：铺底与不透明背景，配合圆角。 */
 static void bt_row_focus_style(lv_obj_t *row)
 {
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(row, 8, LV_PART_MAIN);
 }
 
+/** 在父容器中追加一行 Flex 行；`clickable` 为真时注册点击与焦点样式。 */
 static lv_obj_t *bt_add_row(lv_obj_t *parent, bool clickable)
 {
     lv_obj_t *row = lv_obj_create(parent);
@@ -111,12 +120,14 @@ static lv_obj_t *bt_add_row(lv_obj_t *parent, bool clickable)
     return row;
 }
 
+/** 构建蓝牙设置全屏：顶栏、总开关、配对/重连/低功耗/Wi‑Fi 占位行。 */
 void ui_page_bt_settings_create(lv_obj_t *scr)
 {
     s_pair_spinner = NULL;
     s_reconn_spinner = NULL;
     s_pair_active = false;
     s_reconn_active = false;
+    ui_indev_apply_pointer_profile();
 
     lv_obj_set_style_bg_color(scr, lv_color_white(), 0);
     lv_obj_set_style_pad_all(scr, 12, 0);

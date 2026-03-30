@@ -2,18 +2,21 @@
  * @file ui_page_replay.c
  * @brief 回放页布局：顶栏标题与左滑命中区；事件绑定 `ui_evt_replay_zuohua_pointer_cb`。
  * 固定文案使用 `lv_label_set_text_static()`。
- * @note 左滑判定与主屏横向手势共用阈值，见 **`.cursor/ui_swipe_gestures.md`**。
+ * @note 左滑判定与主屏横向手势共用阈值，见 **`.cursor/rules/ui_swipe_gestures.md`**。
  */
 #include "ui_page_replay.h"
 #include "ui_common.h"
+#include "ui_indev.h"
 #include "ui_events.h"
 #include "ui_i18n.h"
 #include "ui_style.h"
 #include "../logging.h"
 
+/** 构建回放屏：顶栏、左滑命中区与正文绑定 i18n。 */
 void ui_page_replay_create(lv_obj_t *scr)
 {
     ui_i18n_reset_bindings();
+    ui_indev_apply_pointer_profile();
 
     lv_obj_set_style_bg_color(scr, lv_color_white(), 0);
     lv_obj_set_style_pad_all(scr, 0, 0);

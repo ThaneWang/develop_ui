@@ -6,6 +6,7 @@
 #include "ui_common.h"
 #include "ui_font.h"
 
+/** 区域说明类 Label：中文用 `ui_font_cjk()`，黑色正文。 */
 void ui_style_zone_label(lv_obj_t *label)
 {
     const lv_font_t *f = ui_font_cjk();
@@ -13,6 +14,7 @@ void ui_style_zone_label(lv_obj_t *label)
     lv_obj_set_style_text_color(label, lv_color_black(), 0);
 }
 
+/** 在 `ui_style_zone_label` 基础上设换行/行距；`wrap_width>0` 时限制折行宽度（或条件编译下循环滚动）。 */
 void ui_label_i18n_wrap(lv_obj_t *label, lv_coord_t wrap_width)
 {
     ui_style_zone_label(label);
@@ -30,6 +32,7 @@ void ui_label_i18n_wrap(lv_obj_t *label, lv_coord_t wrap_width)
     }
 }
 
+/** 条带容器纵向可滚、自动滚动条，避免固定高度内长文被裁切。 */
 void ui_region_strip_enable_scroll(lv_obj_t *strip)
 {
     lv_obj_add_flag(strip, LV_OBJ_FLAG_SCROLLABLE);

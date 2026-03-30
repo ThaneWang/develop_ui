@@ -5,6 +5,7 @@
 #include "ui_common.h"
 #include "ui_display.h"
 
+/** 对默认 display 调用 `lv_display_set_rotation`；未开启 `UI_FEATURE_DISPLAY_ROTATION` 时为 no-op。 */
 void ui_display_apply_rotation(lv_display_rotation_t rotation)
 {
 #if UI_FEATURE_DISPLAY_ROTATION

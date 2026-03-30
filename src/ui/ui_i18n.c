@@ -67,8 +67,14 @@ static const char *const s_zh[UI_STR_COUNT] = {
     [UI_STR_BT_LOW_POWER] = "低功耗策略",
     [UI_STR_BT_WIFI_SET] = "WiFi SSID / 设置 WiFi 密码",
     [UI_STR_BT_STATUS_ON] = "蓝牙已开启",
-    [UI_STR_MODE_TITLE] = "模式参数",
-    [UI_STR_MODE_BODY] = "模式参数控制(占位)\n下滑或点关闭返回",
+    [UI_STR_MODE_TITLE] = "拍摄模式",
+    [UI_STR_MODE_BODY] =
+        "左右滑动切换模式\n点击屏幕侧边模式会先滚到中央再显示选中\n点击中央模式图标确认并返回主页\n下滑标题栏或点关闭不改动模式",
+    [UI_STR_SHOOT_MODE_3DGS] = "3DGS 实景",
+    [UI_STR_SHOOT_MODE_VIDEO] = "视频",
+    [UI_STR_SHOOT_MODE_3DGS_V] = "3DGS + 视频",
+    [UI_STR_SHOOT_MODE_STILL] = "图片",
+    [UI_STR_STORAGE_FREE_FMT] = "剩余%uG",
 };
 
 static const char *const s_en[UI_STR_COUNT] = {
@@ -127,19 +133,29 @@ static const char *const s_en[UI_STR_COUNT] = {
     [UI_STR_BT_LOW_POWER] = "Low power",
     [UI_STR_BT_WIFI_SET] = "WiFi SSID / set Wi-Fi password",
     [UI_STR_BT_STATUS_ON] = "Bluetooth on",
-    [UI_STR_MODE_TITLE] = "Mode parameters",
-    [UI_STR_MODE_BODY] = "Mode control (placeholder)\nSwipe down or tap close",
+    [UI_STR_MODE_TITLE] = "Shooting mode",
+    [UI_STR_MODE_BODY] = "Swipe to change mode\n"
+                          "Tap a side mode to scroll it to the center first, then it shows as selected\n"
+                          "Tap the centered mode icon to apply and return home\n"
+                          "Swipe down on the title bar or tap close without changing mode",
+    [UI_STR_SHOOT_MODE_3DGS] = "3DGS",
+    [UI_STR_SHOOT_MODE_VIDEO] = "Video",
+    [UI_STR_SHOOT_MODE_3DGS_V] = "3DGS + Video",
+    [UI_STR_SHOOT_MODE_STILL] = "Photo",
+    [UI_STR_STORAGE_FREE_FMT] = "Free%uG",
 };
 
 static ui_i18n_binding_t s_bindings[UI_I18N_MAX_BINDINGS];
 static uint8_t s_binding_n;
 static ui_lang_t s_lang = UI_LANG_ZH;
 
+/** 清空 Label 绑定表；切页重建 UI 前须调用。 */
 void ui_i18n_reset_bindings(void)
 {
     s_binding_n = 0;
 }
 
+/** 登记 Label 与词条 id，并立即设为当前语言文本；表满则静默忽略。 */
 void ui_i18n_bind_label(lv_obj_t *label, ui_str_id_t id)
 {
     if(label == NULL || id >= UI_STR_COUNT) {
@@ -154,6 +170,7 @@ void ui_i18n_bind_label(lv_obj_t *label, ui_str_id_t id)
     lv_label_set_text(label, ui_i18n_str(id));
 }
 
+/** 返回当前语言下静态字符串指针；非法 id 返回空串。 */
 const char *ui_i18n_str(ui_str_id_t id)
 {
     if(id >= UI_STR_COUNT) {
@@ -162,6 +179,7 @@ const char *ui_i18n_str(ui_str_id_t id)
     return s_lang == UI_LANG_ZH ? s_zh[id] : s_en[id];
 }
 
+/** 设置当前语种；非法值则忽略。 */
 void ui_i18n_set_lang(ui_lang_t lang)
 {
     if(lang != UI_LANG_ZH && lang != UI_LANG_EN) {
@@ -170,11 +188,13 @@ void ui_i18n_set_lang(ui_lang_t lang)
     s_lang = lang;
 }
 
+/** 返回当前语种。 */
 ui_lang_t ui_i18n_get_lang(void)
 {
     return s_lang;
 }
 
+/** 按绑定表刷新全部 Label 文本，并对当前屏 `update_layout`。 */
 void ui_i18n_refresh_all(void)
 {
     for(uint8_t i = 0; i < s_binding_n; i++) {

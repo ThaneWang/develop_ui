@@ -8,6 +8,7 @@
 
 #if UI_DEVELOP
 
+/** UI 初始化入口：`UI_DEVELOP` 下经开机动画再进入主界面。 */
 void my_ui_init(void)
 {
     LOG_DEBUG("my_ui_init（UI_DEVELOP）");
@@ -17,6 +18,7 @@ void my_ui_init(void)
 
 #else
 
+/** 非开发构建：空实现。 */
 void my_ui_init(void) {}
 
 #endif

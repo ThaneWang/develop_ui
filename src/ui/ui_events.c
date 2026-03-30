@@ -32,7 +32,7 @@ void ui_evt_zone_click_cb(lv_event_t *e)
  * @brief 回放全屏区域指针手势：左滑返回主页。
  *
  * 事件链：`PRESSED` 记录起点 → `RELEASED` 计算 dx/dy。
- * 判定（与文档一致）：dx <= -UI_SWIPE_MIN_DX，|dy| <= UI_SWIPE_MAX_ABS_DY，且 |dx| > |dy|（横向占优）。
+ * 判定（与文档一致）：dx <= -UI_SWIPE_COMMIT_DX，|dy| <= UI_SWIPE_MAX_ABS_DY，且 |dx| > |dy|（横向占优）。
  * 切页通过 `lv_async_call(ui_nav_replace_with_main_async)`，避免在输入事件回调内直接 `lv_obj_clean`。
  */
 void ui_evt_replay_zuohua_pointer_cb(lv_event_t *e)

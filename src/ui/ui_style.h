@@ -7,6 +7,7 @@
 
 #include "lvgl/lvgl.h"
 
+/** 区域说明 Label 的基础字体与颜色。 */
 void ui_style_zone_label(lv_obj_t *label);
 /**
  * 可 i18n 的区域说明文字：`ui_style_zone_label` + 行距 + `LV_LABEL_LONG_WRAP` + 固定折行宽度。

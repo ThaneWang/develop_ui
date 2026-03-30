@@ -14,16 +14,19 @@
 
 static lv_obj_t *s_boot_root;
 
+/** 开机动画：根容器透明度动画执行回调。 */
 static void boot_fade_opa_cb(void *var, int32_t v)
 {
     lv_obj_set_style_opa((lv_obj_t *)var, (lv_opa_t)v, LV_PART_MAIN);
 }
 
+/** 进度条数值动画：将 bar 设为当前帧 `v`。 */
 static void boot_bar_value_cb(void *var, int32_t v)
 {
     lv_bar_set_value((lv_obj_t *)var, (int32_t)v, LV_ANIM_OFF);
 }
 
+/** 开机动画淡出结束：清屏并创建主界面。 */
 static void boot_fade_done_cb(lv_anim_t *a)
 {
     LV_UNUSED(a);
@@ -39,6 +42,7 @@ static void boot_fade_done_cb(lv_anim_t *a)
     LOG_DEBUG("开机动画结束，进入主界面");
 }
 
+/** 进度条跑满后：启动全屏淡出动画。 */
 static void boot_bar_done_cb(lv_anim_t *a)
 {
     LV_UNUSED(a);
@@ -56,11 +60,13 @@ static void boot_bar_done_cb(lv_anim_t *a)
     lv_anim_start(&fade);
 }
 
+/** 标题 Label 渐显动画执行回调。 */
 static void boot_title_opa_cb(void *var, int32_t v)
 {
     lv_obj_set_style_opa((lv_obj_t *)var, (lv_opa_t)v, LV_PART_MAIN);
 }
 
+/** 清当前屏、搭建开机动画层并启动进度条与标题动画。 */
 void ui_boot_show_then_main(void)
 {
     lv_obj_t *scr = lv_scr_act();

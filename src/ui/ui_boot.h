@@ -5,6 +5,7 @@
 #ifndef UI_BOOT_H
 #define UI_BOOT_H
 
+/** 展示开机动画链，结束后进入 `ui_page_main_create`。 */
 void ui_boot_show_then_main(void);
 
 #endif

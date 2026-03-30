@@ -7,6 +7,7 @@
 
 #include "lvgl/lvgl.h"
 
+/** 构建蓝牙设置页。 */
 void ui_page_bt_settings_create(lv_obj_t *scr);
 
 #endif

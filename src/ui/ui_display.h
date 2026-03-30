@@ -7,6 +7,7 @@
 
 #include "lvgl/lvgl.h"
 
+/** 设置默认 display 的旋转枚举（受 `UI_FEATURE_DISPLAY_ROTATION` 控制）。 */
 void ui_display_apply_rotation(lv_display_rotation_t rotation);
 
 #endif

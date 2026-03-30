@@ -73,14 +73,27 @@ typedef enum {
     UI_STR_BT_STATUS_ON,
     UI_STR_MODE_TITLE,
     UI_STR_MODE_BODY,
+    /** 拍摄模式名称（模式选择条） */
+    UI_STR_SHOOT_MODE_3DGS,
+    UI_STR_SHOOT_MODE_VIDEO,
+    UI_STR_SHOOT_MODE_3DGS_V,
+    UI_STR_SHOOT_MODE_STILL,
+    /** 状态栏存储：`lv_label_set_text_fmt(..., fmt, free_gb)` */
+    UI_STR_STORAGE_FREE_FMT,
     UI_STR_COUNT
 } ui_str_id_t;
 
+/** 清空绑定表（切页前调用）。 */
 void ui_i18n_reset_bindings(void);
+/** 登记 Label 与词条并立即设文。 */
 void ui_i18n_bind_label(lv_obj_t *label, ui_str_id_t id);
+/** 当前语言下静态字符串。 */
 const char *ui_i18n_str(ui_str_id_t id);
+/** 设置当前语言。 */
 void ui_i18n_set_lang(ui_lang_t lang);
+/** 查询当前语言。 */
 ui_lang_t ui_i18n_get_lang(void);
+/** 刷新全部已绑定 Label 并重算根屏布局。 */
 void ui_i18n_refresh_all(void);
 
 #endif
